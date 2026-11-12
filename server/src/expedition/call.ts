@@ -7,8 +7,7 @@ import { priceUsd } from '../providers/pricing';
 import type { RunTurnOutcome, RunTurnRequest } from '../turns/run-turn';
 import { answerValue } from './answer';
 import type { Call } from './author';
-import { add, exec, git, release } from './cambium';
-import { command } from './checks';
+import { command, exec, git } from './checks';
 import { type Contract, defaultCap } from './gates';
 
 const ajv = new Ajv({ strictTypes: false, strictTuples: false, validateFormats: false });
@@ -126,7 +125,18 @@ export async function execute(
         ]);
         if (existing.code === 0) await git(at.repo, ['worktree', 'add', tree, branch]);
         else {
-          await add(at.repo, { workspace: at.token, branch, path: tree, baseSha: base });
+          await git(at.repo, [
+            'cambium',
+            'add',
+            '-json',
+            '-b',
+            branch,
+            '-name',
+            at.token,
+            '-ephemeral',
+            tree,
+            base,
+          ]);
         }
       } else await git(at.repo, ['worktree', 'add', '--detach', tree, base]);
     }
@@ -257,43 +267,39 @@ export async function execute(
               throw new Error(`Answer file outside turn: ${file}`);
           }
         }
-        let why: string | undefined, reviewReceipt: Receipt['review'];
-        if (c.judge && 'check' in c.judge) {
-          const checkTree = path.join(own, 'check');
-          await git(at.repo, ['worktree', 'add', '--detach', checkTree, ref.commit!]);
-          try {
-            const check = await command(c.judge.check, checkTree, c.minutes, at.signal);
-            if (check.code !== 0) why = check.tail;
-          } finally {
-            await git(at.repo, ['worktree', 'remove', '--force', checkTree]);
-          }
-        }
-        if (c.judge && 'review' in c.judge) {
+        let why: string | undefined;
+        let reviewReceipt: Receipt['review'];
+        if (c.judge) {
           const j = c.judge;
-          const reviewTree = path.join(own, 'review');
-          if (!fs.existsSync(reviewTree))
-            await git(at.repo, ['worktree', 'add', '--detach', reviewTree, ref.commit!]);
-          if ((await git(reviewTree, ['rev-parse', 'HEAD'])) !== ref.commit)
-            throw new Error('Review checkout is at the wrong commit');
-          const diff = path.join(own, 'changes.diff');
-          fs.writeFileSync(diff, await git(at.repo, ['diff', base, ref.commit!]));
+          const judged = path.join(own, 'judge');
+          if (!fs.existsSync(judged))
+            await git(at.repo, ['worktree', 'add', '--detach', judged, ref.commit!]);
+          if ((await git(judged, ['rev-parse', 'HEAD'])) !== ref.commit)
+            throw new Error('Judge checkout is at the wrong commit');
           try {
-            const max = at.contract.doneReview ?? defaultCap(at.contract);
-            const review = await run(
-              `${at.token}/review`,
-              j.by,
-              `THE CODE: exact commit ${ref.commit} at ${reviewTree}; diff ${diff}. Open both and quote code.\n${j.review}`,
-              verdict,
-              capabilitiesOf({ t: 'read', reads: [reviewTree, own], web: false }),
-              own,
-              max.usd,
-              r.result,
-              max.minutes
-            );
-            if (review.result.t !== 'passed') why = JSON.stringify(review.result);
-            reviewReceipt = { ...review, who: j.by };
+            if ('check' in j) {
+              const check = await command(j.check, judged, c.minutes, at.signal);
+              if (check.code !== 0) why = check.tail;
+            } else {
+              const diff = path.join(own, 'changes.diff');
+              fs.writeFileSync(diff, await git(at.repo, ['diff', base, ref.commit!]));
+              const max = at.contract.doneReview ?? defaultCap(at.contract);
+              const review = await run(
+                `${at.token}/review`,
+                j.by,
+                `THE CODE: exact commit ${ref.commit} at ${judged}; diff ${diff}. Open both and quote code.\n${j.review}`,
+                verdict,
+                capabilitiesOf({ t: 'read', reads: [judged, own], web: false }),
+                own,
+                max.usd,
+                r.result,
+                max.minutes
+              );
+              if (review.result.t !== 'passed') why = JSON.stringify(review.result);
+              reviewReceipt = { ...review, who: j.by };
+            }
           } finally {
-            await git(at.repo, ['worktree', 'remove', '--force', reviewTree]);
+            await git(at.repo, ['worktree', 'remove', '--force', judged]);
           }
         }
         return {
@@ -310,7 +316,15 @@ export async function execute(
   } finally {
     at.signal.removeEventListener('abort', cancel);
     if (c.t === 'agent' && c.checkout) {
-      await release(at.repo, at.token, `refs/expedition-salvage/${at.token}`);
+      await git(at.repo, [
+        'cambium',
+        'remove',
+        '-safe',
+        '-json',
+        '-salvage-ref',
+        `refs/expedition-salvage/${at.token}`,
+        at.token,
+      ]);
     } else if (fs.existsSync(tree)) await git(at.repo, ['worktree', 'remove', '--force', tree]);
     fs.rmSync(temp, { recursive: true, force: true });
   }

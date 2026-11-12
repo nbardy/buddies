@@ -2,11 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ExpeditionQuestion, ExpeditionView } from '@unleashd/shared';
+import type { ExpeditionQuestion, ExpeditionStep, ExpeditionView } from '@unleashd/shared';
 import type { ExecutionGate } from '../buddies/execution-gate';
 import type { Call } from './author';
 import { type CallDeps, type Receipt, execute } from './call';
-import { git } from './cambium';
+import { git } from './checks';
 import { runPlan } from './child';
 import { type Contract, defaultCap, gates } from './gates';
 
@@ -21,14 +21,56 @@ type Entry =
   | ({ t: 'question' } & ExpeditionQuestion)
   | { t: 'answer'; key: string; value: unknown }
   | { t: 'status'; status: ExpeditionView['status']; reason?: string };
-type Run = {
-  id: string;
-  folder: string;
-  log: Entry[];
-  active: Map<string, { abort: AbortController; done: Promise<Receipt> }>;
-  waiters: Map<string, (v: unknown) => void>;
+// Pattern: one-store-one-index (docs/patterns.md#one-store-one-index)
+// Fold each entry once, on append or boot. Guard: expedition-backend replay and budget.
+class Run {
+  launch!: Extract<Entry, { t: 'launch' }>;
+  readonly steps = new Map<string, { call: Call; receipt?: Receipt }>();
+  readonly questions = new Map<string, ExpeditionQuestion>();
+  readonly answers = new Map<string, Extract<Entry, { t: 'answer' }>>();
+  readonly wakes = new Map<string, number>();
+  readonly versions: number[] = [];
+  status: Extract<Entry, { t: 'status' }> = { t: 'status', status: 'running' };
+  readonly active = new Map<string, { abort: AbortController; done: Promise<Receipt> }>();
+  readonly waiters = new Map<string, (v: unknown) => void>();
   child?: ReturnType<typeof runPlan>;
-};
+  constructor(
+    readonly id: string,
+    readonly folder: string,
+    entries: Entry[] = []
+  ) {
+    for (const e of entries) this.fold(e);
+  }
+  fold(e: Entry) {
+    switch (e.t) {
+      case 'launch':
+        this.launch = e;
+        break;
+      case 'plan':
+        this.versions.push(e.version);
+        break;
+      case 'start':
+        this.steps.set(e.hash, { call: e.call });
+        break;
+      case 'result':
+        this.steps.get(e.hash)!.receipt = e.receipt;
+        break;
+      case 'wake':
+        this.wakes.set(e.key, e.cost);
+        break;
+      case 'question':
+        this.questions.set(e.key, e);
+        break;
+      case 'answer':
+        this.answers.set(e.key, e);
+        this.questions.delete(e.key);
+        break;
+      case 'status':
+        this.status = e;
+        break;
+    }
+  }
+}
 export function createExpeditions(
   d: CallDeps & {
     root: string;
@@ -75,92 +117,47 @@ export function createExpeditions(
   const append = (r: Run, e: Entry) => {
     allowed();
     fs.appendFileSync(path.join(r.folder, 'log.jsonl'), `${JSON.stringify(e)}\n`, { mode: 0o600 });
-    r.log.push(e);
+    r.fold(e);
   };
-  const launchOf = (r: Run) => r.log[0] as Extract<Entry, { t: 'launch' }>;
-  const answerOf = (r: Run, key: string) =>
-    r.log.find((e) => e.t === 'answer' && e.key === key) as
-      | Extract<Entry, { t: 'answer' }>
-      | undefined;
-  const known = (r: Run, call: Call) =>
-    (
-      r.log.find((e) => e.t === 'result' && e.key === call.key && e.hash === hash(call)) as
-        | Extract<Entry, { t: 'result' }>
-        | undefined
-    )?.receipt.result;
-  const status = (r: Run) =>
-    (
-      [...r.log].reverse().find((e) => e.t === 'status') as
-        | Extract<Entry, { t: 'status' }>
-        | undefined
-    )?.status ?? 'running';
+  const known = (r: Run, call: Call) => r.steps.get(hash(call))?.receipt?.result;
   function view(id: string): ExpeditionView {
-    const r = get(id),
-      launch = launchOf(r);
-    const started = new Map<string, Call>(),
-      settled = new Map<string, Receipt>();
-    let wakes = 0;
-    const questions = new Map<string, ExpeditionQuestion>();
-    for (const e of r.log) {
-      if (e.t === 'start') started.set(e.hash, e.call);
-      if (e.t === 'result') settled.set(e.hash, e.receipt);
-      if (e.t === 'wake') wakes += e.cost;
-      if (e.t === 'question') questions.set(e.key, e);
-      if (e.t === 'answer') questions.delete(e.key);
+    const r = get(id);
+    const steps: ExpeditionStep[] = [];
+    let spend = [...r.wakes.values()].reduce((a, b) => a + b, 0);
+    let reserved = 0;
+    for (const [hash, { call, receipt }] of r.steps) {
+      if (receipt) spend += receipt.cost;
+      else reserved += capOf(call, r.launch.contract);
+      if (call.t === 'question') continue;
+      const row = (key: string, who: string, value?: Receipt): ExpeditionStep => ({
+        key,
+        hash,
+        who,
+        state: value?.result.t ?? 'running',
+        cost: value?.cost ?? 0,
+        conversationId: value?.conversationId,
+        commit: receipt?.commit,
+        why: value?.why ?? (value && 'why' in value.result ? value.result.why : undefined),
+      });
+      steps.push({
+        ...row(call.key, call.t === 'agent' ? call.by : call.t, receipt),
+        cost: (receipt?.cost ?? 0) - (receipt?.review?.cost ?? 0),
+      });
+      if (receipt?.review)
+        steps.push(row(`${call.key}/review`, receipt.review.who, receipt.review));
     }
-    const latest = [...r.log].reverse().find((e) => e.t === 'status') as
-      | Extract<Entry, { t: 'status' }>
-      | undefined;
     return {
       id,
-      workspaceId: launch.workspaceId,
-      goal: launch.contract.goal,
-      budget: launch.contract.budget,
-      status: status(r),
-      spend: wakes + [...settled.values()].reduce((n, r) => n + r.cost, 0),
-      reserved: [...started].reduce(
-        (n, [h, c]) => n + (settled.has(h) ? 0 : capOf(c, launch.contract)),
-        0
-      ),
-      // A stopped run refuses answers; do not leave an actionable owner form in its view.
-      // Guard: expedition-backend manager stop closes the questions.
-      questions: status(r) === 'stopped' ? [] : [...questions.values()],
-      versions: r.log.flatMap((e) => (e.t === 'plan' ? [e.version] : [])),
-      reason: latest?.reason,
-      steps: r.log.flatMap((e) => {
-        if (e.t !== 'start' || e.call.t === 'question') return [];
-        const result = r.log.find(
-          (x) => x.t === 'result' && x.key === e.call.key && x.hash === e.hash
-        ) as Extract<Entry, { t: 'result' }> | undefined;
-        const receipt = result?.receipt;
-        return [
-          {
-            key: e.call.key,
-            hash: e.hash,
-            who: e.call.t === 'agent' ? e.call.by : e.call.t,
-            state: receipt?.result.t ?? 'running',
-            cost: (receipt?.cost ?? 0) - (receipt?.review?.cost ?? 0),
-            conversationId: receipt?.conversationId,
-            commit: receipt?.commit,
-            why:
-              receipt?.why ?? (receipt && 'why' in receipt.result ? receipt.result.why : undefined),
-          },
-          ...(receipt?.review
-            ? [
-                {
-                  key: `${e.call.key}/review`,
-                  hash: e.hash,
-                  who: receipt.review.who,
-                  state: receipt.review.result.t,
-                  cost: receipt.review.cost,
-                  why: receipt.review.why,
-                  conversationId: receipt.review.conversationId,
-                  commit: receipt.commit,
-                },
-              ]
-            : []),
-        ];
-      }),
+      workspaceId: r.launch.workspaceId,
+      goal: r.launch.contract.goal,
+      budget: r.launch.contract.budget,
+      status: r.status.status,
+      reason: r.status.reason,
+      spend,
+      reserved,
+      steps,
+      questions: r.status.status === 'stopped' ? [] : [...r.questions.values()],
+      versions: r.versions,
     };
   }
   async function question(
@@ -169,35 +166,32 @@ export function createExpeditions(
     question: string,
     kind: ExpeditionQuestion['kind']
   ): Promise<unknown> {
-    const answered = answerOf(r, key);
+    const answered = r.answers.get(key);
     if (answered) return answered.value;
-    if (!r.log.some((e) => e.t === 'question' && e.key === key))
-      append(r, { t: 'question', key, question, kind });
+    if (!r.questions.has(key)) append(r, { t: 'question', key, question, kind });
     const waiting = new Promise((resolve) => r.waiters.set(key, resolve));
     if (kind === 'manager') {
       append(r, { t: 'status', status: 'held', reason: question });
-      if (!r.log.some((e) => e.t === 'wake' && e.key === key)) {
-        const cost = (launchOf(r).contract.leaderWake ?? defaultCap(launchOf(r).contract)).usd;
+      if (!r.wakes.has(key)) {
+        const cost = (r.launch.contract.leaderWake ?? defaultCap(r.launch.contract)).usd;
         const v = view(r.id);
         if (v.spend + v.reserved + cost > v.budget.usd) return waiting;
         append(r, { t: 'wake', key, cost });
       }
-      await d.wake(r.id, launchOf(r).contract.leader.slice(6), question, r.folder, key);
+      await d.wake(r.id, r.launch.contract.leader.slice(6), question, r.folder, key);
     }
     return waiting;
   }
   async function step(r: Run, call: Call): Promise<Receipt> {
     const h = hash(call),
       token = hash([r.id, call.key, h]);
-    const saved = r.log.find((e) => e.t === 'result' && e.key === call.key && e.hash === h) as
-      | Extract<Entry, { t: 'result' }>
-      | undefined;
-    if (saved) return saved.receipt;
+    const saved = r.steps.get(h)?.receipt;
+    if (saved) return saved;
     const existing = r.active.get(token);
     if (existing) return existing.done;
-    const previousStart = r.log.some((e) => e.t === 'start' && e.hash === h);
+    const previousStart = r.steps.has(h);
     const v = view(r.id),
-      cap = capOf(call, launchOf(r).contract);
+      cap = capOf(call, r.launch.contract);
     if (!Number.isFinite(cap) || cap < 0) throw new Error('Invalid step cap');
     if (!previousStart) {
       if (v.spend + v.reserved + cap > v.budget.usd + 1e-9) {
@@ -219,7 +213,7 @@ export function createExpeditions(
             ref: { id: token },
           },
         };
-      const launch = launchOf(r);
+      const launch = r.launch;
       if (Date.now() > launch.at + launch.contract.budget.hours * 3600000)
         return { cost: 0, result: { t: 'refused', reason: 'deadline' } };
       return admitted(call.needs, launch.contract, () =>
@@ -273,7 +267,7 @@ export function createExpeditions(
     await question(r, `failure/${hash(why)}`, why, 'manager');
   }
   async function finish(r: Run, result: { out: unknown; ref: { commit?: string } }) {
-    const c = launchOf(r).contract;
+    const c = r.launch.contract;
     for (const [i, done] of c.done.entries()) {
       if ('owner' in done) {
         if (
@@ -329,9 +323,9 @@ export function createExpeditions(
           .trim()
           .split('\n')
           .map((line) => JSON.parse(line) as Entry);
-        const r: Run = { id, folder, log, active: new Map(), waiters: new Map() };
+        const r = new Run(id, folder, log);
         runs.set(id, r);
-        if (d.gate.t === 'enabled' && !['met', 'stopped'].includes(status(r))) evaluate(r);
+        if (d.gate.t === 'enabled' && !['met', 'stopped'].includes(r.status.status)) evaluate(r);
       }
     },
     async launch(file: string, contentHash: string, workspaceId: string) {
@@ -347,7 +341,7 @@ export function createExpeditions(
       fs.mkdirSync(path.join(folder, 'plans'), { recursive: true, mode: 0o700 });
       fs.writeFileSync(path.join(folder, 'plan.expedition.ts'), source);
       fs.writeFileSync(path.join(folder, 'plans/v1.expedition.ts'), source);
-      const r: Run = { id, folder, log: [], active: new Map(), waiters: new Map() };
+      const r = new Run(id, folder);
       runs.set(id, r);
       append(r, {
         t: 'launch',
@@ -365,7 +359,7 @@ export function createExpeditions(
       allowed();
       const r = get(id),
         q = view(id).questions.find((q) => q.key === key);
-      if (['met', 'stopped'].includes(status(r))) throw new Error('Expedition is finished');
+      if (['met', 'stopped'].includes(r.status.status)) throw new Error('Expedition is finished');
       if (
         !q ||
         q.kind === 'manager' ||
@@ -380,9 +374,9 @@ export function createExpeditions(
     async act(id: string, buddyId: string, action: 'continue' | 'stop' | 'rewrite', why: string) {
       allowed();
       const r = get(id);
-      if (launchOf(r).contract.leader !== `buddy:${buddyId}`)
+      if (r.launch.contract.leader !== `buddy:${buddyId}`)
         throw new Error('Only the manager may act');
-      if (['met', 'stopped'].includes(status(r))) throw new Error('Expedition is finished');
+      if (['met', 'stopped'].includes(r.status.status)) throw new Error('Expedition is finished');
       if (action === 'rewrite') {
         const file = path.join(r.folder, 'plan.expedition.ts'),
           source = fs.readFileSync(file, 'utf8');
@@ -399,7 +393,7 @@ export function createExpeditions(
               ? { t: 'passed', out: why, ref: { id: hash(c) } }
               : undefined)
         );
-        if (hash(checked.contract) !== hash(launchOf(r).contract))
+        if (hash(checked.contract) !== hash(r.launch.contract))
           return { issues: ['The owner contract changed'] };
         if (fs.readFileSync(file, 'utf8') !== source)
           return { issues: ['The plan changed during gates'] };

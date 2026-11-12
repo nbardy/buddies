@@ -4,12 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ExpeditionProposal, ExpeditionResult } from '@unleashd/shared';
 import { z } from 'zod';
-import type { Call } from './author';
+import { type Call, capSchema } from './author';
 import { AUTHOR, runPlan } from './child';
 
-const cap = z
-  .object({ usd: z.number().positive(), minutes: z.number().positive().max(35791) })
-  .strict();
 export const Contract = z
   .object({
     goal: z.string().min(1),
@@ -26,9 +23,9 @@ export const Contract = z
     ),
     pools: z.record(z.number().int().positive()).default({ claude: 1, codex: 1 }),
     autoApply: z.object({ usd: z.number().nonnegative() }).default({ usd: 0 }),
-    call: cap.partial().default({ usd: 1, minutes: 20 }),
-    leaderWake: cap.optional(),
-    doneReview: cap.optional(),
+    call: capSchema.partial().default({ usd: 1, minutes: 20 }),
+    leaderWake: capSchema.pick({ usd: true }).optional(),
+    doneReview: capSchema.optional(),
   })
   .strict();
 export type Contract = z.infer<typeof Contract>;
@@ -134,7 +131,7 @@ export async function gates(
       ...defaults,
       `pools = ${JSON.stringify(contract.pools)}`,
       `autoApply = $${contract.autoApply.usd}`,
-      `leaderWake = ${JSON.stringify(contract.leaderWake ?? defaultCap(contract))}`,
+      `leaderWake = ${(contract.leaderWake ?? defaultCap(contract)).usd}`,
       `doneReview = ${JSON.stringify(contract.doneReview ?? defaultCap(contract))}`,
     ],
   };

@@ -22,7 +22,9 @@ Find the implementations with `rg -n "Pattern: <name>"`.
 **Pattern:** one normalized store (rows by id) plus ONE derived index, computed in a single pass. The index's
 fields keep their identity when their content is unchanged. Per-id cursors (families) serve single-item views.
 Updates cost what changed, not n.
-**Here:** `client/src/atoms/conversation-index.ts` (about 10 full passes per event became one index).
+**Here:** `client/src/atoms/conversation-index.ts` (about 10 full passes per event became one index);
+`server/src/expedition/engine.ts` folds each log entry once on append or boot, and all replay,
+admission and view readers use that index.
 
 ## sum-types
 **Smell:** nullable field bags, and "what kind / which provider is this?" checks inside core logic.

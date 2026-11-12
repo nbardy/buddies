@@ -47,6 +47,11 @@ test('preview reserves reviews; rejects unawaited plans, forged IPC and nonfinit
     await assert.rejects(gates(file), /less than|finite/);
     fs.writeFileSync(
       file,
+      source.replace('done:[],rules:[]', 'done:[],rules:[],leaderWake:{usd:.3,minutes:3}')
+    );
+    await assert.rejects(gates(file), /minutes/);
+    fs.writeFileSync(
+      file,
       `process.send!({t:'end',result:{out:'forged',ref:{id:'fake'}}});${source}`
     );
     await assert.rejects(gates(file), /undefined|process/);

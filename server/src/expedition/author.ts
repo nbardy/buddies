@@ -26,12 +26,15 @@ export function step<I extends z.ZodType<{ id: string }>, O extends z.ZodTypeAny
 ): typeof d {
   return d;
 }
-type Options = {
-  id?: string | number;
-  reads?: readonly Readable[];
-  on?: Held<unknown>;
-  continues?: Held<unknown>;
-};
+const options = z
+  .object({
+    id: z.union([z.string(), z.number()]).optional(),
+    reads: z.array(z.custom<Readable>()).readonly().optional(),
+    on: z.custom<Held<unknown>>().optional(),
+    continues: z.custom<Held<unknown>>().optional(),
+  })
+  .strict();
+type Options = z.infer<typeof options>;
 type Out<D> = D extends { returns?: infer O extends z.ZodTypeAny }
   ? z.output<O>
   : z.output<typeof report>;
@@ -72,10 +75,16 @@ export type Message =
 const text = <I>() =>
   z.union([z.string().min(1), z.custom<(item: I) => string>((v) => typeof v === 'function')]);
 const schema = z.custom<z.ZodTypeAny>((v) => v instanceof z.ZodType);
+export const capSchema = z
+  .object({
+    usd: z.number().positive().finite(),
+    minutes: z.number().positive().max(35791),
+  })
+  .strict();
 const common = {
   item: schema.optional(),
   returns: schema.optional(),
-  minutes: z.number().positive().optional(),
+  minutes: capSchema.shape.minutes.optional(),
   needs: z.array(z.string()).optional(),
 };
 const definition = <I>() =>
@@ -88,7 +97,7 @@ const definition = <I>() =>
         reads: z.union([z.string(), z.array(z.string())]).optional(),
         web: z.boolean().optional(),
         checkout: z.boolean().optional(),
-        usd: z.number().positive().optional(),
+        usd: capSchema.shape.usd.optional(),
         judge: z
           .union([
             z.object({ check: text<I>() }).strict(),
@@ -167,33 +176,17 @@ export function expedition<const S extends Record<string, Definition>>(config: {
           defaults.push(`${name}.${field} = ${value}`);
           // Infinity crosses JSON IPC as null, turning an alias cap into a $0 reservation.
           // Guard: expedition-small rejects nonfinite alias caps.
-          return z
-            .number()
-            .positive()
-            .max(field === 'minutes' ? 35791 : Number.MAX_VALUE)
-            .parse(value);
+          return capSchema.shape[field].parse(value);
         };
         const usd = 'by' in d ? cap('usd', 1) : 0,
           minutes = cap('minutes', 20);
-        const judge =
-          'by' in d && d.judge && 'review' in d.judge
-            ? { ...d.judge, by: resolve(d.judge.by) }
-            : undefined;
         const by = 'by' in d ? resolve(d.by) : '';
         if (d.needs?.some((key) => ['claude', 'codex', 'gemini', 'cursor', 'muse'].includes(key)))
           throw new Error('needs names resources; agent harness slots are acquired automatically');
         const attempt = async (first?: unknown, second?: Options): Promise<ExpeditionResult> => {
           const item: unknown = d.item?.parse(first);
           if (d.item) z.object({ id: z.string() }).parse(item);
-          const input = z
-            .object({
-              id: z.union([z.string(), z.number()]).optional(),
-              reads: z.array(z.unknown()).optional(),
-              on: z.unknown().optional(),
-              continues: z.unknown().optional(),
-            })
-            .strict()
-            .parse(d.item ? (second ?? {}) : (first ?? {})) as Options;
+          const input = options.parse(d.item ? (second ?? {}) : (first ?? {}));
           const id = input.id ?? (item as { id: string } | undefined)?.id;
           const key = `${name}${id === undefined ? '' : `/${id}`}`;
           const base = {
@@ -216,10 +209,10 @@ export function expedition<const S extends Record<string, Definition>>(config: {
                   web: d.web ?? false,
                   checkout: d.checkout ?? false,
                   judge:
-                    judge ??
-                    (d.judge && 'check' in d.judge
+                    d.judge &&
+                    ('check' in d.judge
                       ? { check: render(d.judge.check, item) }
-                      : undefined),
+                      : { ...d.judge, by: resolve(d.judge.by) }),
                 };
           const result = await call(c);
           if (result.t === 'passed' || result.t === 'failed') {
