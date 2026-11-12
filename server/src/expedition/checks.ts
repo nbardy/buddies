@@ -42,77 +42,51 @@ export function argv(command: string): string[] {
   if (!words.length) throw new Error('Empty command');
   return words;
 }
-
-// Pattern: one-definition (docs/patterns.md#one-definition)
-// Git/Cambium and host checks share cancellation, bounded output and scrubbed process spawning.
-export function exec(
-  bin: string,
-  cwd: string,
-  args: string[],
-  minutes = 15,
-  signal?: AbortSignal,
-  home?: string
-) {
-  const keep = /^(PATH|USER|LOGNAME|LANG|LC_ALL|TZ|TMPDIR|GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL))$/;
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => keep.test(k)));
-  return new Promise<{ code: number; stdout: string; stderr: string; tail: string }>(
-    (resolve, reject) => {
-      const child = spawn(bin, args, {
+export async function command(text: string, cwd: string, minutes: number, stop: AbortSignal) {
+  const [bin, ...args] = argv(text);
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'expedition-check-'));
+  const env = Object.fromEntries(
+    ['PATH', 'USER', 'LANG', 'LC_ALL', 'TZ'].flatMap((k) =>
+      process.env[k] ? [[k, process.env[k]]] : []
+    )
+  );
+  try {
+    return await new Promise<{ code: number; stdout: string; tail: string }>((resolve, reject) => {
+      const child = spawn(bin!, args, {
         cwd,
+        env: { ...env, HOME: scratch, TMPDIR: scratch },
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: {
-          ...env,
-          HOME: home ?? process.env.HOME,
-          TMPDIR: home ?? process.env.TMPDIR,
-          GIT_CONFIG_COUNT: '2',
-          GIT_CONFIG_KEY_0: 'core.hooksPath',
-          GIT_CONFIG_VALUE_0: '/dev/null',
-          GIT_CONFIG_KEY_1: 'core.fsmonitor',
-          GIT_CONFIG_VALUE_1: 'false',
-          GIT_TERMINAL_PROMPT: '0',
-        },
       });
-      let stdout = '';
-      let stderr = '';
-      let tail = '';
+      let stdout = '',
+        tail = '';
       const kill = () => {
         try {
           process.kill(-child.pid!, 'SIGKILL');
         } catch {}
       };
       child.stdout.on('data', (b) => {
-        stdout = (stdout + b).slice(-(16 << 20));
+        stdout = (stdout + b).slice(-1048576);
         tail = (tail + b).slice(-4000);
       });
       child.stderr.on('data', (b) => {
-        stderr = (stderr + b).slice(-4000);
         tail = (tail + b).slice(-4000);
       });
-      const timer = setTimeout(labelled('expedition-command', kill), minutes * 60000);
-      signal?.addEventListener('abort', kill, { once: true });
-      if (signal?.aborted) kill();
-      child.once('error', reject);
-      child.once('exit', kill);
-      child.once('close', (code) => {
+      const timer = setTimeout(
+        labelled('expedition-check', kill),
+        Math.min(minutes * 60000, 2147483647)
+      );
+      stop.addEventListener('abort', kill, { once: true });
+      if (stop.aborted) kill();
+      child.on('error', reject);
+      child.on('exit', kill);
+      child.on('close', (code) => {
         clearTimeout(timer);
-        signal?.removeEventListener('abort', kill);
-        resolve({ code: code ?? -1, stdout, stderr, tail });
+        stop.removeEventListener('abort', kill);
+        resolve({ code: code ?? -1, stdout, tail });
       });
-    }
-  );
-}
-export async function git(cwd: string, args: string[]) {
-  const r = await exec('git', cwd, args);
-  if (r.code) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
-  return r.stdout.trim();
-}
-export async function command(text: string, cwd: string, minutes: number, signal: AbortSignal) {
-  const [bin, ...args] = argv(text);
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'expedition-check-'));
-  try {
-    return await exec(bin!, cwd, args, minutes, signal, home);
+    });
   } finally {
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(scratch, { recursive: true, force: true });
   }
 }

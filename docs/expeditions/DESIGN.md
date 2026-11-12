@@ -34,12 +34,12 @@ is over the server budget and must not be represented as meeting it. No minifica
 |---|---:|---:|
 | author + child (including sandbox host) | 300 | 412 |
 | engine | 220 | 447 |
-| call + answer + worktree + command helpers | 300 | 508 |
+| call + answer + worktree + command helpers | 300 | 522 |
 | gates | 130 | 139 |
 | manager | 70 | 23 |
 | routes + tool | 200 | 145 |
 | shared view/proposal | 80 | 52 |
-| server + shared | **1,300 max** | **1,726** |
+| server + shared | **1,300 max** | **1,740** |
 | client | **700 max** | 298 |
 | expedition tests | **1,000 max** | 489 |
 
@@ -55,16 +55,17 @@ The real manager is exercised through its Buddy tool in the integrated test; the
 manager prompt/CLI probe. Runtime and budget limitations must be reported with the final checks.
 
 The cost/Stop follow-up removed repeated log scans (one append/boot fold now owns the index),
-the second process spawner, duplicate judge checkout cleanup, duplicate option/cap definitions,
-and the ignored wake-minute option. It removes 36 formatted source lines; the 1,300 cap is still
-missed by 426. No behavior was moved outside this count to meet the cap. Remaining blocks:
+the Cambium add/remove forwarding wrappers, duplicate judge checkout cleanup, repeated option/cap definitions,
+and the ignored wake-minute option. It removes 22 formatted source lines; the 1,300 cap is still
+missed by 440. No behavior was moved outside this count to meet the cap. Remaining blocks:
 
 | File | Lines | Capability retained |
 |---|---:|---|
 | answer.ts | 56 | Final JSON extraction without accepting nested fragments of truncated answers |
 | author.ts | 278 | Inferred item/output types, strict definitions, defaults, keyed promises and questions |
-| call.ts | 334 | Native turn grants, exact-commit checks/reviews, pricing, file containment and safe worktree release |
-| checks.ts | 118 | Shell-free argv, scrubbed environment, process-group cancellation, bounded output and Git commands |
+| call.ts | 335 | Native turn grants, exact-commit checks/reviews, pricing, file containment and safe worktree release |
+| cambium.ts | 39 | Bounded async Git capture, scrubbed environment and hooks disabled |
+| checks.ts | 92 | Shell-free argv, scrubbed environment, process-group cancellation and output tails |
 | child.mjs | 40 | Restricted imports and exclusive host IPC authority |
 | child.ts | 94 | Permission-limited plan child, execution timeout, process cleanup |
 | engine.ts | 447 | Durable replay index, resource/budget admission, owner answers, completion criteria, manager rewrites |
@@ -78,3 +79,8 @@ Owner Stop writes the cancelled receipt, ends that plan evaluation and holds at 
 call, even for `.try`. The normal manager wake names the cancelled step. A rewrite dropping
 work or a manager stopping a run carries the engine's aborted signal and does not trigger
 another manager wake. The backend guard is `owner Stop cancels a step and wakes its manager`.
+
+Git's bounded output (16 MiB, error on overflow) and a host check's retained stdout tail
+(1 MiB, successful exit preserved) are distinct policies. They retain their native process
+implementations; merging them required more code than it removed. The real-process guard in
+`expedition-gates.test.ts` keeps both behaviors.

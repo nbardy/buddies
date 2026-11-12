@@ -6,7 +6,7 @@ import type { ExpeditionQuestion, ExpeditionStep, ExpeditionView } from '@unleas
 import type { ExecutionGate } from '../buddies/execution-gate';
 import type { Call } from './author';
 import { type CallDeps, type Receipt, execute } from './call';
-import { git } from './checks';
+import { git } from './cambium';
 import { runPlan } from './child';
 import { type Contract, defaultCap, gates } from './gates';
 

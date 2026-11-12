@@ -7,7 +7,8 @@ import { priceUsd } from '../providers/pricing';
 import type { RunTurnOutcome, RunTurnRequest } from '../turns/run-turn';
 import { answerValue } from './answer';
 import type { Call } from './author';
-import { command, exec, git } from './checks';
+import { exec, git } from './cambium';
+import { command } from './checks';
 import { type Contract, defaultCap } from './gates';
 
 const ajv = new Ajv({ strictTypes: false, strictTuples: false, validateFormats: false });
