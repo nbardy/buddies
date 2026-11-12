@@ -538,8 +538,8 @@ variant. Shared workspace and branch safety is not re-implemented per feature: i
 snapshots dirty work to a salvage ref, `archive` tags and verifies before it deletes), and oompa and Buddies both call it.
 A later incident is then one more typed refusal in the owner of the rule (launch preflight, retire archiving), not a
 branch added to the loop.
-**Here:** `server/src/expedition-kernel/` (one log and pure reconciliation),
-`server/src/expeditions-v1/cambium.ts` (typed worktree results) and `checks.ts` (isolated host processes).
-Guards: `server/test/expeditions-v1-executor.test.ts` and `expeditions-v1-agent-restarts.test.ts`.
-History: the lean retry loop described above was itself replaced by keyed expeditions; its four records
-were stopped and retired and its host deleted on 2026-11-11. No code reads the retired records.
+**Here:** `server/src/expedition/`: one log replays the plan, while `turns/run-turn.ts`
+owns turn identity, adoption and cancellation. Git worktrees still use Cambium's safe removal.
+Guards: `server/test/expedition-backend.test.ts`, `expedition-small.test.ts`, and `run-turn.test.ts`.
+History: the retry-loop host was replaced by the keyed kernel, which was replaced on 2026-11-12
+because it duplicated the turn runtime. No code reads either retired store.

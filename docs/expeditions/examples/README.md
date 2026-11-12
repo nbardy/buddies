@@ -15,10 +15,9 @@
 A Buddy writes/adapts one file in its workspace, resolves the header’s **before launch** items, then calls the `expedition` tool with `propose { file: '<absolute path>' }`.
 The owner reviews the card’s preview and advisory limits, then presses **Launch**.
 
-Every file passes the real typecheck, contract, dry-run and static launch gates with
-`pnpm test:server expedition-kernel-contract` (no server or agents). This checks declarations,
-not the existence or execution of target-repo tools. Buddy slugs assume Claude in this free test;
-replace them with real ids and verify their providers before launch. Each header names v1 limits:
+Every file passes the real typecheck, contract and dry-run gates with
+`pnpm test:server expedition-small` (no server or agents). This checks declarations,
+not the existence or execution of target-repo tools. The free test does not resolve Buddy identities; replace slugs with real ids before launch. Each header names v1 limits:
 concurrency pools do not enforce machine locks, dollar sub-budgets or lifetime-use counts;
 write scopes and frozen graders need the stated independent checks. A useful no-go record can
 still leave numerical contract criteria unmet; only the host declares done.
@@ -30,7 +29,7 @@ catalog (no invented aliases). A normal call requires a pass; `.try` lets the pl
 result union. Concurrency is ordinary `Promise.all(items.map(item => call.try(item)))`.
 `x.checkin` wakes the leader; review judges remain `{review: rubric, by: who}`.
 The preview's `defaults` reports resolved pools, rewrite/wake/review/call caps and every step's
-cap provenance, including unreached steps. See [the authoring contract](../DESIGN.md#2-the-idea).
+caps, including unreached steps. See [the authoring contract](../DESIGN.md).
 
 Briefs describe v1 directly: workers integrate only inside their supplied private checkout,
 the owner merges; repo records are written from supplied call evidence; scopes and frozen

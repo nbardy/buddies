@@ -57,15 +57,9 @@ client/src/atoms/*                 → jotai atoms, derived views, WS actions
 client/src/components/{Sidebar,Chat,ConversationConfigPicker}.tsx → main desktop UI
 client/src/mobile/*                → mobile view tree (second shell, same core)
 client/src/atoms/ui.ts             → device-local UI prefs + NEW-badge seen indexes
-server/src/expedition-kernel/      → keyed expeditions (v1): one .expedition.ts file, log, reconcile, runner, gates;
-                                     types in shared/src/expedition-keyed.ts (`keyed`)
-server/src/expeditions-v1/         → its one-file host: executor (commands, checks, agent calls as Buddy
-                                     requests, asks), leader and owner ports, routes under
-                                     /api/buddies/keyed-expeditions. Live only with the execution
-                                     gate on, else read-only. State
-                                     and open findings: docs/expeditions/keyed/v1/CONNECT_PLAN.md §10
-client/src/components/buddies/Keyed*.tsx → its timeline view and rail rows
-client/src/components/buddies/{ExpeditionProposal,ExpeditionRail}.tsx → keyed proposal card and rail (both shells).
+server/src/expedition/             → one plan child, replay loop, runTurn calls, Buddy manager and owner routes
+shared/src/expedition.ts           → proposal and view types
+client/src/components/buddies/Expedition*.tsx → proposal, rail and run view in both shells
 {server,client}/src/swarm/          → QUARANTINED swarm/oompa viewer; outside code imports
                                      only swarm/index.ts (guard: swarm-quarantine.test.ts)
 ```
@@ -158,7 +152,7 @@ client/src/components/buddies/{ExpeditionProposal,ExpeditionRail}.tsx → keyed 
   think the design could be simpler?", "let the model write promise code"), down to one import
   (2026-11-11, a82cfba). What survived shows the test: `x.ask` and `x.checkin` do what the language
   cannot (wait on the owner, wake the leader), and `step({...})` exists only because the type
-  checker needs it. The Buddy tool's description (`server/src/expeditions-v1/tool.ts`) lists the whole
+  checker needs it. The Buddy tool's description (`server/src/expedition/tool.ts`) lists the whole
   surface and is sent on every Buddy turn: a change that makes it longer states the capability it
   buys.
 - Structural patterns live in `docs/patterns.md` (one store + one index,
@@ -185,7 +179,7 @@ requirements to rebuild omitted machinery.
 |---|---|
 | Code patterns: the structural patterns, tagging rule, where each is implemented | `docs/patterns.md` |
 | Writing a design spec: TS types, goals that name their mechanism, invariants that name their guard, ❌ gaps; Quint for the concurrent core | `docs/design-specs.md` |
-| Keyed expeditions: one-file plans, kernel and host | `docs/expeditions/keyed/v1/DESIGN.md`, `CONNECT_PLAN.md` |
+| Expeditions: one-file plans and replay | `docs/expeditions/DESIGN.md`, `docs/expeditions/LESSONS.md` |
 | Buddies: core model, motivating cases, rationale and scope | `product/buddies/CORE_DESIGN.md` |
 | Client state: subscriptions, mutations, perf, hook ordering | `docs/client-state.md` |
 | Mobile view tree, grep gates, DeviceKind, UI-state partition | `docs/mobile-view-tree.md` |
@@ -206,30 +200,29 @@ requirements to rebuild omitted machinery.
 | Memory reviewer benchmark: rerun, grade, extend, historical evidence (read before changing reviewer prompts/tools) | [Memory curation benchmark](server/test/fixtures/memory-curation/README.md) |
 | New provider integration protocol | `docs/agent_client_spec.md` |
 
-## Keyed expedition examples
+## Expedition examples
 
-Runnable one-file cases live in `docs/expeditions/keyed/v1/examples/`
+Runnable one-file cases live in `docs/expeditions/examples/`
 (start with `01-gtm.expedition.ts`; index: `README.md`). The real launch gates for every
-example run free with `pnpm test:server expedition-kernel-contract`; this starts no agents
+example run free with `pnpm test:server expedition-small`; this starts no agents
 or server. Read each header’s prerequisites and v1 limitations before proposing it.
 
-## Keyed expedition real-agent conformance
+## Expedition real-agent conformance
 
 Run `pnpm probe:expeditions --harness all` after changing what an expedition turn is told or
 allowed, a harness upgrade, or a model change. Run an integrated real expedition only AFTER
-these probes pass. `--only answer-fenced|answer-bare|answer-progress|tree-none|checkout|temp|review|leader`
+these probes pass. `--only answer-fenced|answer-bare|answer-progress|tree-none|checkout|temp|review`
 selects one probe; `--harness claude|codex|all` selects the CLI; `--keep` retains scratch files.
-The normal pass is 16 short turns (Haiku 5.5 and GPT-6 Luna, low effort), capped at about $0.20
+The normal pass is 14 short turns (Haiku 5.5 and GPT-6 Luna, low effort), capped at about $0.20
 and three minutes per turn (14 turns measured $0.0255 on 2026-11-11); actual usage, prompts,
 argv, native transcripts and decisive evidence
-are in dated gitignored `output/expedition-probes-*` directories. It uses executor policy/request/
-answer functions and agent-cli's own turnCommand, fresh git repositories under `/tmp`, no backend,
+are in dated gitignored `output/expedition-probes-*` directories. It uses the production prompt, capabilities and answer functions and agent-cli's own turnCommand, fresh git repositories under `/tmp`, no backend,
 no live stores or owner token. It removes only CLI artifacts whose recorded cwd matches its
 scratch root, and leaves no agent process running. Codex's reported advisories are checked as
 advisories, with their reasons present in the prompt; a passing probe does not turn them into
 security boundaries. Re-run only failing probes after fixing their responsible system layer.
 
-The `temp` probe (and the leader probe where the leader has a shell) requires a shell heredoc,
+The `temp` probe requires a shell heredoc,
 `mktemp` with a template in `$TMPDIR`, and a refused write to `/tmp`. A write turn has its own
 scratch directory outside its working directory and read roots, made by the host and removed
 when the turn settles (adoption included). Codex gets it as a writable root; Claude's sandbox
@@ -580,7 +573,7 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   are not caught statically, and tsc does not report a floating promise either.
   The authoring library catches it at run time instead: a plan that returns while
   a call or review it issued is unanswered ends as `threw`, naming the pending
-  keys (`authoring/session.ts`; guard `expedition-kernel-runner.test.ts`). An
+  keys (`server/src/expedition/author.ts`; guard `expedition-small.test.ts`). An
   un-awaited call already answered before the return is not caught.
   `noMisusedPromises` (presence-check noise, partial Express coverage) and
   `noUnnecessaryConditions` (mostly false) stay off.

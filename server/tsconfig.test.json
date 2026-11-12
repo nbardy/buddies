@@ -15,9 +15,6 @@
   "include": ["src/**/*", "test/**/*"],
   "exclude": [
     "node_modules",
-    "dist",
-    // Plan folders import the bare specifier `expedition`, which resolves only in the plan
-    // runner and in the typecheck gate (expedition-kernel/gates.ts checks them there).
-    "test/fixtures/expedition-plans"
+    "dist"
   ]
 }
