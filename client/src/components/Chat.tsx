@@ -34,7 +34,6 @@ import { useRestartRecovery } from '../hooks/useRestartRecovery';
 import { useSavedPrompts } from '../hooks/useSavedPrompts';
 import { useTurnDiagnostics } from '../hooks/useTurnDiagnostics';
 import { RestartRecoveryPrompt } from '../restart/RestartRecoveryPrompt';
-import { SwarmConvoPrefix } from '../swarm';
 import { copyText } from '../utils/clipboard';
 import { buildThreadTranscript } from '../utils/conversation-transcript';
 import { buildUnifiedSubAgents } from '../utils/subAgents';
@@ -273,8 +272,6 @@ export function Chat({ id }: { id: string }) {
 
   const messageGroups = useAtomValue(groupsFamily(id ?? ''));
 
-  // The server sets a swarm prefix only on chats, so no kind check here.
-  const visibleSwarmDebugPrefix = detail?.swarmDebugPrefix ?? null;
   // A fresh object each render would invalidate VirtualizedMessageList's memos
   // on every streaming chunk; the row kind only changes on structural updates.
   const rowKind = conversation?.kind;
@@ -287,8 +284,7 @@ export function Chat({ id }: { id: string }) {
   const conversationConfig = detail?.config.config ?? null;
 
   // Transcript and fork draft live in utils/conversation-transcript.ts so the
-  // mobile conversation header produces byte-identical output. The swarm-debug
-  // prefix strip that messageGroups does for display happens in there too.
+  // mobile conversation header produces byte-identical output.
   const threadCopyText = useMemo(
     () =>
       conversation && detail ? buildThreadTranscript({ row: conversation, detail, messages }) : '',
@@ -580,26 +576,13 @@ export function Chat({ id }: { id: string }) {
 
       {unifiedSubAgents.length > 0 && (
         <div className="thread-context">
-          <SubAgentPanel
-            presentation="tree"
-            subAgents={unifiedSubAgents}
-            workingDirectory={conversation.cwd}
-          />
+          <SubAgentPanel presentation="tree" subAgents={unifiedSubAgents} />
         </div>
       )}
 
       {messages.length === 0 ? (
         <div className="messages-container">
           {buddyContext && <BuddyConvoHeader context={buddyContext} />}
-          {visibleSwarmDebugPrefix && (
-            <div style={{ paddingBottom: '24px' }}>
-              <SwarmConvoPrefix
-                layout="wide"
-                prefix={visibleSwarmDebugPrefix}
-                swarmId={conversation.kind.t === 'worker' ? conversation.kind.swarmId : null}
-              />
-            </div>
-          )}
           {isBuddyBuilderHelper ? (
             <div className="buddy-helper-panel">
               <span className="buddy-helper-kicker">Buddy Builder · hire a Buddy or a team</span>
@@ -644,8 +627,6 @@ export function Chat({ id }: { id: string }) {
             totalMessageCount={messages.length}
             scrollToBottomRef={scrollToBottomRef}
             workingDirectory={conversation.cwd}
-            swarmDebugPrefix={visibleSwarmDebugPrefix}
-            swarmId={conversation.kind.t === 'worker' ? conversation.kind.swarmId : null}
             buddyContext={buddyContext}
           />
           {shouldShowTypingIndicator(isStreaming, streamingText) && (

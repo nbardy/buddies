@@ -12,7 +12,7 @@ import './SubAgentPanel.css';
  * `cards` (mobile pane): one card per agent under a "Sub-agents" section.
  */
 export type SubAgentPanelProps =
-  | { presentation: 'tree'; subAgents: SubAgent[]; workingDirectory: string }
+  | { presentation: 'tree'; subAgents: SubAgent[] }
   | { presentation: 'cards'; subAgents: SubAgent[] };
 
 interface ShownSubAgents {
@@ -50,7 +50,7 @@ export function SubAgentPanel(props: SubAgentPanelProps) {
   const shown = shownSubAgents(props.subAgents);
   if (shown.display.length === 0) return null;
   return props.presentation === 'tree' ? (
-    <SubAgentTree shown={shown} workingDirectory={props.workingDirectory} />
+    <SubAgentTree shown={shown} />
   ) : (
     <SubAgentCards shown={shown} />
   );
@@ -95,13 +95,7 @@ function SubAgentCards({ shown }: { shown: ShownSubAgents }) {
   );
 }
 
-function SubAgentTree({
-  shown,
-  workingDirectory,
-}: {
-  shown: ShownSubAgents;
-  workingDirectory: string;
-}) {
+function SubAgentTree({ shown }: { shown: ShownSubAgents }) {
   const [isExpanded, setIsExpanded] = useState(true);
   // Track whether the user has manually toggled — if so, don't auto-collapse/expand on hover
   const userToggledRef = useRef(false);
@@ -205,16 +199,7 @@ function SubAgentTree({
 
                 <div className="subagent-info">
                   <span className="subagent-description ui-truncate">
-                    {agent.id.startsWith('swarm-') ? (
-                      <Link
-                        to={`/workers/detail?project=${encodeURIComponent(workingDirectory)}`}
-                        className="swarm-link"
-                      >
-                        {truncateDescription(agent.description)}
-                      </Link>
-                    ) : (
-                      childLink(agent, truncateDescription(agent.description))
-                    )}
+                    {childLink(agent, truncateDescription(agent.description))}
                   </span>
                   <span className="subagent-stats ui-row">
                     {agent.toolUses > 0 && (

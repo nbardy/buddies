@@ -66,7 +66,7 @@ class RunTurnPolicy extends ChatTurnPolicy {
     private readonly record: RunTurnAdoption,
     private readonly save: (o: ExecutionOutcome) => void
   ) {
-    super(() => null, volatileCarrier);
+    super(volatileCarrier);
     this.maxRuntimeMs = record.maxRuntimeMs;
   }
   // agent-cli encodes this capability set; adoption restores this same record, without respawn.

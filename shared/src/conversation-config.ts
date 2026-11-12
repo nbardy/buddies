@@ -226,7 +226,6 @@ export const ConversationCreationMetadataSchema = z.object({
   initialMessageDispatchClaimedAt: z.string().datetime().optional(),
   initialMessageDispatchClaimToken: z.string().min(1).optional(),
   initialMessageDispatchedAt: z.string().datetime().optional(),
-  swarmDebugPrefix: z.string().optional(),
   resumedFromConversationId: ConversationIdSchema.optional(),
 });
 export type ConversationCreationMetadata = z.infer<typeof ConversationCreationMetadataSchema>;

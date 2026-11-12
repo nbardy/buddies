@@ -49,7 +49,7 @@ export function ConversationListMobile({ scope = 'all' }: { scope?: 'all' | 'cha
       >
         {list}
       </MobilePage>
-      {showCreate && <NewConversationSheet kind="chat" onClose={() => setShowCreate(false)} />}
+      {showCreate && <NewConversationSheet onClose={() => setShowCreate(false)} />}
     </>
   );
 }

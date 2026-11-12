@@ -77,11 +77,6 @@ function runtimeFixture(
     invalidateCurrentSession: options.invalidateCurrentSession ?? (async () => undefined),
     persistCurrentSession: options.persistCurrentSession ?? (async () => undefined),
     getConversation: options.getConversation ?? (() => undefined),
-    readLatestOompaRuntime: async () => ({
-      available: false,
-      run: null,
-      reason: 'No runs directory found',
-    }),
     createSessionId: () => 'rotated-session',
     executeTurn: options.executeTurn,
     turnAttempts: options.turnAttempts,
@@ -1222,7 +1217,6 @@ test('first-turn markers are kind-exclusive: builder, buddy, general', async () 
       workingDirectory: '/tmp',
       configState: fixture.configState,
       kind,
-      swarmDebugPrefix: 'SWARM DEBUG',
     });
     const before = capture.spawns.length;
     conversation.sendMessage('Lets make some updates', { origin: 'owner_input', inputId: id });
@@ -1238,7 +1232,7 @@ test('first-turn markers are kind-exclusive: builder, buddy, general', async () 
   assert.match(builder, /Working directory: \/tmp\n/);
   assert.match(builder, /Hire into the workspace with that root path/);
 
-  // The hidden briefing is injected once, with its memory generation, and never the swarm prefix.
+  // The hidden briefing is injected once, with its memory generation,.
   const buddy = await firstPrompt(
     buddyKind({ buddyId: 'buddy-1', workspaceId: 'workspace-1' }),
     'buddy-thread'
@@ -1249,13 +1243,13 @@ test('first-turn markers are kind-exclusive: builder, buddy, general', async () 
     buddy,
     new RegExp(`buddy-memory-generation ${Buffer.from('7').toString('base64url')} `)
   );
-  assert.doesNotMatch(buddy, /unleashd:buddy-builder-v1|unleashd:swarm-prefix/);
+  assert.doesNotMatch(buddy, /unleashd:buddy-builder-v1/);
   assert.match(buddy, /\n\nLets make some updates$/);
 
   const general = await firstPrompt({ t: 'chat' }, 'general-thread');
   assert.doesNotMatch(general, /unleashd:buddy-builder-v1/);
   assert.doesNotMatch(general, /unleashd:buddy-context-v2/);
-  assert.match(general, /unleashd:swarm-prefix/);
+  assert.equal(general, 'Lets make some updates');
 });
 
 test('foreground Buddy deadline uses the conversation budget and reports timeout after joined drain', async (t) => {

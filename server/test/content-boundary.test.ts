@@ -26,7 +26,7 @@ test('old HTTP pages and v3 socket frames retain visible prose through the reloa
   });
   assert.deepEqual(oldTool.messages[0].body, {
     t: 'parts',
-    parts: [{ t: 'swarm_launch', command: 'oompa run runs.json' }],
+    parts: [{ t: 'tool', name: 'shell', input: { command: 'oompa run runs.json' } }],
   });
   const frame = classifyServerFrame({
     type: 'message',
@@ -105,7 +105,7 @@ test('an unchanged pre-upgrade stored tool row equals a full rebuilt native part
   assert.deepEqual((await read(old))[0].body, (await read(rebuilt))[0].body);
   assert.deepEqual((await read(old))[0].body, {
     t: 'parts',
-    parts: [{ t: 'swarm_launch', command: 'oompa run runs.json' }],
+    parts: [{ t: 'tool', name: 'shell', input: { command: 'oompa run runs.json' } }],
   });
 });
 

@@ -44,7 +44,6 @@ const Conversation = createConversationRuntime({
   persistCurrentSession: async () => undefined,
   buddies: fakeBuddyPort(),
   getConversation: () => undefined,
-  readLatestOompaRuntime: async () => ({ available: false, run: null, reason: 'fixture' }),
   createSessionId: () => 'session',
 });
 

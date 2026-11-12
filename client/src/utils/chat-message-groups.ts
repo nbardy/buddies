@@ -1,5 +1,5 @@
 import type { BuddyWorkerThread, ContentPart, Message } from '@unleashd/shared';
-import { messageTranscriptContent, stripFirstMessagePrefix } from './conversation-transcript';
+import { messageTranscriptContent } from './conversation-transcript';
 
 export type AssistantResponsePart =
   | { type: 'content'; key: string; message: Message }
@@ -28,18 +28,11 @@ function fragment(message: Message, part: ContentPart): Message {
 }
 
 /** Provider records stay ordered; one assistant response owns the display and Copy action. */
-export function groupChatMessages(
-  messages: readonly Message[],
-  prefix: string | null
-): MessageGroup[] {
-  return groupMessageRange(messages, prefix, 0);
+export function groupChatMessages(messages: readonly Message[]): MessageGroup[] {
+  return groupMessageRange(messages, 0);
 }
 
-function groupMessageRange(
-  messages: readonly Message[],
-  prefix: string | null,
-  firstIndex: number
-): MessageGroup[] {
+function groupMessageRange(messages: readonly Message[], firstIndex: number): MessageGroup[] {
   const groups: MessageGroup[] = [];
   let response: AssistantResponse | undefined;
   const content = (message: Message, key: string) => {
@@ -66,10 +59,7 @@ function groupMessageRange(
   };
   for (const [localIndex, message] of messages.entries()) {
     const index = firstIndex + localIndex;
-    const msg =
-      index === 0 && message.role === 'user' && prefix
-        ? stripFirstMessagePrefix(message, prefix)
-        : message;
+    const msg = message;
     if (msg.role !== 'assistant') {
       if (response)
         response.copyText = response.messages.map(messageTranscriptContent).join('\n\n');
@@ -114,17 +104,16 @@ function groupMessageRange(
 export function regroupChatMessages(
   previousGroups: readonly MessageGroup[],
   previousMessages: readonly Message[],
-  messages: readonly Message[],
-  prefix: string | null
+  messages: readonly Message[]
 ): MessageGroup[] {
   const tail = previousGroups.at(-1);
-  if (!tail || messages.length < tail.firstMessageIndex) return groupChatMessages(messages, prefix);
+  if (!tail || messages.length < tail.firstMessageIndex) return groupChatMessages(messages);
   const start = tail.firstMessageIndex;
   for (let i = 0; i < start; i++)
-    if (messages[i] !== previousMessages[i]) return groupChatMessages(messages, prefix);
+    if (messages[i] !== previousMessages[i]) return groupChatMessages(messages);
   return [
     ...previousGroups.slice(0, -1),
-    ...groupMessageRange(messages.slice(start), prefix, start),
+    ...groupMessageRange(messages.slice(start), start),
   ];
 }
 
@@ -132,8 +121,7 @@ export function regroupChatMessages(
 export function withStreamingTail(
   settled: MessageGroup[],
   messages: readonly Message[],
-  streamingText: string,
-  prefix: string | null
+  streamingText: string
 ): MessageGroup[] {
   const last = messages.at(-1);
   const tail = settled.at(-1);
@@ -144,5 +132,5 @@ export function withStreamingTail(
     ...last,
     body: { t: 'text', text: last.body.text + streamingText },
   };
-  return [...settled.slice(0, -1), ...groupMessageRange(window, prefix, tail.firstMessageIndex)];
+  return [...settled.slice(0, -1), ...groupMessageRange(window, tail.firstMessageIndex)];
 }

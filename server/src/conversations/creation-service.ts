@@ -8,7 +8,6 @@ export interface CreationFingerprintInput {
   workingDirectory: string;
   config: ConversationConfig;
   initialMessage?: string;
-  swarmDebugPrefix?: string;
   resumedFromConversationId?: string;
   /** The one identity, written to the record once. */
   kind: ConversationKind;
@@ -40,7 +39,6 @@ export function creationFingerprint(input: CreationFingerprintInput): string {
         workingDirectory: input.workingDirectory,
         config: input.config,
         initialMessage: input.initialMessage ?? null,
-        swarmDebugPrefix: input.swarmDebugPrefix ?? null,
         resumedFromConversationId: input.resumedFromConversationId ?? null,
         kind: input.kind,
         ...(input.branch ? { branch: input.branch } : {}),
@@ -80,7 +78,6 @@ export function createConversationService(ports: ConversationCreationPorts) {
         commandId: input.commandId,
         fingerprint: creationFingerprint(input),
         initialMessage: input.initialMessage,
-        swarmDebugPrefix: input.swarmDebugPrefix,
         resumedFromConversationId: input.resumedFromConversationId,
         branch: input.branch,
       },
@@ -102,7 +99,6 @@ export function createConversationService(ports: ConversationCreationPorts) {
         kind: creation.record.kind,
         existingSessionId: currentSession?.sessionId,
         existingSessionAudienceKey: currentSession?.buddyAudienceKey,
-        swarmDebugPrefix: input.swarmDebugPrefix ?? null,
         resumedFromConversationId: input.resumedFromConversationId ?? null,
         buddyBriefing: input.buddyBriefing,
       });

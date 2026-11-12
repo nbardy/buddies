@@ -11,7 +11,6 @@ import type {
   ConversationKind,
   ConversationRow,
   Message,
-  OompaRuntimeSnapshot,
   Provider as ProviderName,
   ProviderTurnUsage,
   QueuedMessage,
@@ -38,10 +37,8 @@ import {
   type MemoryGenerationInput,
   createMemorySnapshot,
 } from '../buddies/turn-policy';
-import { SWARM_POLL_INTERVAL_MS, SWARM_POLL_THROTTLE_MS } from '../constants/timeouts';
 import type { RuntimeTurnAttemptObserver } from '../observability';
 import { resolveConfigAgainstProviderCatalog } from '../providers/catalog-service';
-import { SwarmObservers } from '../swarm';
 import { BackgroundWork } from '../turns/background-work';
 import type { Effect, Phase } from '../turns/execution-state';
 import type { TurnOwner } from '../turns/executions';
@@ -87,7 +84,7 @@ function unknownInput(): TurnInput {
 /** The host server's ports: the runner's, the Buddy policies', and the conversation's own. */
 export interface ConversationRuntimeDependencies
   extends BuddyTurnPolicyDependencies,
-    Omit<TurnRunnerPorts, 'executeTurn' | 'turnAttempts' | 'swarmObservers' | 'backgroundWork'> {
+    Omit<TurnRunnerPorts, 'executeTurn' | 'turnAttempts' | 'backgroundWork'> {
   persistCurrentSession(
     conversation: ConversationRuntimeView,
     sessionId: string,
@@ -103,7 +100,6 @@ export interface ConversationRuntimeDependencies
         getMemorySnapshot?: () => MemorySnapshot | null;
       }
     | undefined;
-  readLatestOompaRuntime(projectRoot: string): Promise<OompaRuntimeSnapshot>;
   /** Test seam for the real provider boundary; production uses agent-cli directly. */
   executeTurn?: typeof executeCommand;
   turnAttempts?: RuntimeTurnAttemptObserver;
@@ -179,7 +175,6 @@ export interface ConversationOptions {
   observedModel?: string | null;
   /** Provider-generated label (Claude ai-title/custom-title) restored on hydration. */
   title?: string | null;
-  swarmDebugPrefix?: string | null;
   buddyBriefing?: string | null;
   /** Native generation when the Buddy resolver provides one; otherwise derived from the briefing. */
   buddyMemoryGeneration?: MemoryGenerationInput | null;
@@ -219,11 +214,6 @@ export function createConversationRuntime(
       executeTurn: dependencies.executeTurn ?? executeCommand,
       turnAttempts: dependencies.turnAttempts ?? NOOP_TURN_ATTEMPT_OBSERVER,
       backgroundWork: dependencies.backgroundWork ?? new BackgroundWork(),
-      // One async swarm poller per working directory, shared by all turns there.
-      swarmObservers: new SwarmObservers(dependencies.readLatestOompaRuntime, {
-        intervalMs: SWARM_POLL_INTERVAL_MS,
-        throttleMs: SWARM_POLL_THROTTLE_MS,
-      }),
     },
   };
   return class extends Conversation {
@@ -269,8 +259,6 @@ export class Conversation extends EventEmitter {
   // Provider-generated label; until observed the row label is the first message.
   title: string | undefined;
   private _titleSource: 'ai' | 'custom' | null = null;
-  // Swarm debug prefix for the first CLI message; kept so the detail can render it.
-  swarmDebugPrefix: string | null;
   // Latest request's usage on the current session (docs/turn-lifecycle.md#provider-usage).
   providerUsage: ProviderTurnUsage | null;
   subAgents: SubAgent[];
@@ -309,7 +297,6 @@ export class Conversation extends EventEmitter {
       resumedFromConversationId = null,
       observedModel = null,
       title = null,
-      swarmDebugPrefix = null,
       buddyBriefing = null,
       buddyMemoryGeneration = null,
     } = opts;
@@ -336,7 +323,6 @@ export class Conversation extends EventEmitter {
     this.observedModel = observedModel;
     this.title = title ?? undefined;
     this._titleSource = this.title !== undefined ? 'custom' : null;
-    this.swarmDebugPrefix = kind.t === 'chat' ? swarmDebugPrefix : null;
     this._policy = this.policyFor(this._kind, {
       memorySnapshot: createMemorySnapshot(buddyBriefing, buddyMemoryGeneration),
       audienceKey: existingSessionId ? (opts.existingSessionAudienceKey ?? null) : null,
@@ -360,12 +346,12 @@ export class Conversation extends EventEmitter {
   /** One policy per kind; Buddy code lives only in buddies/turn-policy.ts. */
   private policyFor(kind: ConversationKind, seed: BuddyTurnPolicySeed): TurnPolicy {
     return matchConversationKind<TurnPolicy>(kind, {
-      chat: () => new ChatTurnPolicy(() => this.swarmDebugPrefix, this.inputCarrier()),
+      chat: () => new ChatTurnPolicy(this.inputCarrier()),
       buddy: (buddyKind) => new BuddyTurnPolicy(buddyKind, this.policyHost(), this.env.deps, seed),
       builder: () =>
         new BuddyBuilderTurnPolicy(this.policyHost(), this.env.deps, this.inputCarrier()),
-      // A swarm worker is an external oompa transcript; typing into it is a plain chat turn.
-      worker: () => new ChatTurnPolicy(() => null, this.inputCarrier()),
+      // A worker is an old external oompa transcript; typing into it is a plain chat turn.
+      worker: () => new ChatTurnPolicy(this.inputCarrier()),
     });
   }
 
@@ -958,7 +944,6 @@ export class Conversation extends EventEmitter {
       subAgents: this.subAgents,
       latestTurn: { observedModel: this.observedModel, usage: this.providerUsage },
       latestAttempt: null,
-      swarmDebugPrefix: this.swarmDebugPrefix,
     };
   }
 

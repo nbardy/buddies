@@ -30,7 +30,6 @@ export interface ContextSubject {
   /** Provider-reported model of the latest turn. */
   readonly observedModel: string | null;
   readonly providerUsage: ProviderTurnUsage | null;
-  readonly swarmDebugPrefix: string | null;
   readonly resumedFromConversationId: string | null;
 }
 
@@ -215,8 +214,6 @@ export function buildContextBreakdown(
     const split = splitBriefing(snapshotBriefing ?? '');
     briefingText = split.briefing;
     memoryText = split.memory;
-  } else {
-    briefingText = conversation.swarmDebugPrefix ?? '';
   }
 
   const mcpText = mcpSpecJson(conversation);

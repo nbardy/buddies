@@ -32,8 +32,8 @@
   flex-wrap: wrap;
 }
 
-/* Header model/effort chip. NOT `.config-summary` — SwarmDetail.css already
-   owns that name globally with `flex-direction: column`, which stacked
+/* Header model/effort chip. NOT `.config-summary`: the old SwarmDetail sheet
+   owned that name globally with `flex-direction: column`, which stacked
    "Opus 5 / · High / ▾" onto three lines. Keep this prefix. */
 .chat-config-summary {
   flex-wrap: nowrap;

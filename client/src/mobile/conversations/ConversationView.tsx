@@ -32,7 +32,6 @@ import { useConversationBodies } from '../../hooks/useConversationBodies';
 import { useCopyAction } from '../../hooks/useCopyAction';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { useTurnDiagnostics } from '../../hooks/useTurnDiagnostics';
-import { SwarmConvoPrefix } from '../../swarm';
 import {
   mobileConversationRouteState,
   resolveMobileConversationDestination,
@@ -163,15 +162,12 @@ export function ConversationView({
   // window; restored after layout so the reader's place does not jump.
   const bottomOffsetBeforeGrow = useRef<number | null>(null);
 
-  // Same derivation as Chat.tsx: unified sub-agents + swarm prefix + resume lineage.
+  // Same derivation as Chat.tsx: unified sub-agents + resume lineage.
   // Reuses shared utils so desktop and mobile cannot drift.
   const unifiedSubAgents = useMemo(
     () => buildUnifiedSubAgents(subAgents, childConversations),
     [subAgents, childConversations]
   );
-
-  // The server sets a swarm prefix only on chats (T09), so no kind check here.
-  const visibleSwarmDebugPrefix = detail?.swarmDebugPrefix ?? null;
 
   const resumedFromConversationId = conversation?.resumedFrom ?? '';
   const resumedFromConversation = useAtomValue(rowFamily(resumedFromConversationId));
@@ -352,7 +348,6 @@ export function ConversationView({
     pendingConfigCommand?.state.tag === 'rejected' ? pendingConfigCommand.state.message : null;
 
   const hasThreadContext = unifiedSubAgents.length > 0 || !!conversation.resumedFrom;
-  const showSwarmPrefix = !!visibleSwarmDebugPrefix;
 
   return (
     <div className="mobile-chat">
@@ -408,7 +403,7 @@ export function ConversationView({
       )}
 
       {/* Thread-context strip: the same views Chat.tsx renders, in their card presentations. */}
-      {(hasThreadContext || showSwarmPrefix) && (
+      {hasThreadContext && (
         <div className="mobile-chat__thread-context">
           {unifiedSubAgents.length > 0 ? (
             <SubAgentPanel presentation="cards" subAgents={unifiedSubAgents} />
@@ -418,13 +413,6 @@ export function ConversationView({
               presentation="card"
               sourceConversationId={conversation.resumedFrom}
               sourceConversation={resumedFromConversation ?? null}
-            />
-          ) : null}
-          {showSwarmPrefix ? (
-            <SwarmConvoPrefix
-              layout="narrow"
-              prefix={visibleSwarmDebugPrefix!}
-              swarmId={conversation.kind.t === 'worker' ? conversation.kind.swarmId : null}
             />
           ) : null}
         </div>

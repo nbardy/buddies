@@ -35,11 +35,6 @@ function runtimeFixture() {
     persistCurrentSession: async () => undefined,
     buddies: fakeBuddyPort(),
     getConversation: () => undefined,
-    readLatestOompaRuntime: async () => ({
-      available: false,
-      run: null,
-      reason: 'No Oompa runtime',
-    }),
     createSessionId: () => 'rotated-session',
   });
   return {
@@ -63,7 +58,6 @@ test('empty Buddy conversation construction is inert and drops a swarm debug pre
     configState: fixture.configState,
     kind: buddyKind(buddyContext),
     buddyBriefing: 'Private Buddy briefing',
-    swarmDebugPrefix: 'SWARM DEBUG',
   });
 
   assert.equal(conversation.isRunning, false);
@@ -71,7 +65,6 @@ test('empty Buddy conversation construction is inert and drops a swarm debug pre
   assert.deepEqual(conversation.messages, []);
   assert.deepEqual(fixture.broadcasts, []);
   assert.deepEqual(conversation.buddyContext, buddyContext);
-  assert.equal(conversation.swarmDebugPrefix, null);
 });
 
 test('empty Buddy WebSocket creation resolves and registers without sending a provider turn', async () => {

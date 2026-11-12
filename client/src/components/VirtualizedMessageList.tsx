@@ -1,7 +1,6 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { BuddyContext } from '@unleashd/shared';
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
-import { SwarmConvoPrefix } from '../swarm';
 import type { MessageGroup } from '../utils/chat-message-groups';
 import { messageTranscriptContent } from '../utils/conversation-transcript';
 import { TranscriptGroup } from '../views/transcript/TranscriptGroup';
@@ -34,8 +33,6 @@ interface VirtualizedMessageListProps {
   scrollToBottomRef?: React.MutableRefObject<(() => void) | null>;
   /** Conversation working directory — used to resolve relative file paths in previews. */
   workingDirectory: string;
-  swarmDebugPrefix?: string | null;
-  swarmId?: string | null;
   buddyContext?: BuddyContext;
 }
 
@@ -75,8 +72,6 @@ export function VirtualizedMessageList({
   totalMessageCount,
   scrollToBottomRef,
   workingDirectory,
-  swarmDebugPrefix,
-  swarmId,
   buddyContext,
 }: VirtualizedMessageListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -84,16 +79,13 @@ export function VirtualizedMessageList({
   // Track conversation ID to detect switches
   const prevConversationIdRef = useRef<string | null>(null);
 
-  // The server sets a swarm prefix only on chat kinds; a Buddy thread has none.
-  const visibleSwarmDebugPrefix = swarmDebugPrefix ?? null;
-  const contextItemCount = (buddyContext ? 1 : 0) + (visibleSwarmDebugPrefix ? 1 : 0);
+  const contextItemCount = buddyContext ? 1 : 0;
   const totalItems = messageGroups.length + contextItemCount;
   // Read once, when the virtualizer first needs a scroll offset. A memo here
   // re-summed every group on each streaming frame for a value used at mount.
   const estimateInitialOffset = () => {
     let total = 0;
     if (buddyContext) total += 88;
-    if (visibleSwarmDebugPrefix) total += 80;
     for (const group of messageGroups) total += estimateGroupSize(group);
     return total;
   };
@@ -112,7 +104,6 @@ export function VirtualizedMessageList({
     initialOffset: estimateInitialOffset,
     estimateSize: (index) => {
       if (buddyContext && index === 0) return 88;
-      if (visibleSwarmDebugPrefix && index === (buddyContext ? 1 : 0)) return 80;
       const groupIndex = index - contextItemCount;
       return estimateGroupSize(messageGroups[groupIndex]);
     },
@@ -178,7 +169,7 @@ export function VirtualizedMessageList({
   }, [conversationId, totalMessageCount, markMessagesSeen, lastMessageRef]);
 
   // Expose scrollToBottom function via ref
-  // NOTE: Must use totalItems (not messageGroups.length) because when swarmDebugPrefix
+  // NOTE: Must use totalItems (not messageGroups.length) because when buddyContext
   // is present, the virtualizer has messageGroups.length + 1 items. Using
   // messageGroups.length - 1 would scroll to the second-to-last item, missing the
   // final message group.
@@ -232,31 +223,6 @@ export function VirtualizedMessageList({
                   }}
                 >
                   <BuddyConvoHeader context={buddyContext} />
-                </div>
-              );
-            }
-
-            if (visibleSwarmDebugPrefix && virtualItem.index === (buddyContext ? 1 : 0)) {
-              return (
-                <div
-                  key={virtualItem.key}
-                  data-index={virtualItem.index}
-                  ref={virtualizer.measureElement}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    transform: `translateY(${virtualItem.start}px)`,
-                  }}
-                >
-                  <div style={{ paddingBottom: '24px' }}>
-                    <SwarmConvoPrefix
-                      layout="wide"
-                      prefix={visibleSwarmDebugPrefix}
-                      swarmId={swarmId ?? null}
-                    />
-                  </div>
                 </div>
               );
             }

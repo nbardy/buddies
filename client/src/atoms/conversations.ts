@@ -28,7 +28,7 @@ import {
   updateConversationIndex,
 } from './conversation-index';
 import { atomWithPrevious, keyedAtoms, stableAtom } from './structural';
-import { hasUnseenAfter, prefsAtom, seenAtom } from './ui';
+import { hasUnseenAfter, seenAtom } from './ui';
 
 export type {
   ConversationListEntry,
@@ -139,14 +139,9 @@ export const rowsAtom = rowStore.all;
 /** One conversation's row; null when the client does not hold it. */
 export const rowFamily = rowStore.byKey;
 
-const promotedSetAtom = stableAtom(
-  (get) => new Set(get(prefsAtom).promotedWorkers) as ReadonlySet<string>,
-  (a, b) => a.size === b.size && [...a].every((id) => b.has(id))
-);
-
 /** Every collection view, one pass per list move (see conversation-index.ts). */
 export const listIndexAtom = atomWithPrevious((get, previous: ListIndex | undefined) => {
-  const next = buildListIndex(get(conversationIndexAtom).list, get(promotedSetAtom), Date.now());
+  const next = buildListIndex(get(conversationIndexAtom).list, Date.now());
   return previous ? reuseUnchangedFields(previous, next) : next;
 });
 
@@ -244,7 +239,6 @@ export const streamFamily = streamStore.byKey;
 
 interface SettledGroups {
   messages: readonly Message[];
-  prefix: string | null;
   groups: MessageGroup[];
 }
 
@@ -256,14 +250,11 @@ const settledGroupsFamily = atomFamily((id: string) =>
   atomWithPrevious((get, previous: SettledGroups | undefined): SettledGroups => {
     const transcript = get(transcriptFamily(id));
     const messages = messagesOf(transcript);
-    // Swarm debug prefix stripped from the first user record (chat kinds only).
-    const prefix = detailOf(transcript)?.swarmDebugPrefix ?? null;
-    if (previous && previous.messages === messages && previous.prefix === prefix) return previous;
-    const groups =
-      previous && previous.prefix === prefix
-        ? regroupChatMessages(previous.groups, previous.messages, messages, prefix)
-        : groupChatMessages(messages, prefix);
-    return { messages, prefix, groups };
+    if (previous && previous.messages === messages) return previous;
+    const groups = previous
+      ? regroupChatMessages(previous.groups, previous.messages, messages)
+      : groupChatMessages(messages);
+    return { messages, groups };
   })
 );
 
@@ -273,12 +264,7 @@ export const groupsFamily = atomFamily((id: string) =>
   labelled(
     atom((get) => {
       const settled = get(settledGroupsFamily(id));
-      return withStreamingTail(
-        settled.groups,
-        settled.messages,
-        get(streamFamily(id)),
-        settled.prefix
-      );
+      return withStreamingTail(settled.groups, settled.messages, get(streamFamily(id)));
     }),
     `groups:${id}`
   )
@@ -297,7 +283,6 @@ export interface CreateArgs {
   /** chat | buddy{context} | fork{from}: the one kind encoding (T09). */
   kind: CreateKind;
   initialMessage?: string;
-  swarmDebugPrefix?: string;
 }
 
 export interface CreateCommand {

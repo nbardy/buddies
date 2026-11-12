@@ -24,7 +24,6 @@ const PREFS_DEFAULTS: DeviceUiPrefs = {
   showDoneConversations: false,
   showWorkerConversations: false,
   lastWorkingDirectory: null,
-  promotedWorkers: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -192,13 +191,6 @@ export function setShowDoneConversations(show: boolean): void {
 
 export function setShowWorkerConversations(show: boolean): void {
   setPrefs({ showWorkerConversations: show });
-}
-
-export function promoteWorker(conversationId: string): void {
-  const promoted = jotaiStore.get(prefsAtom).promotedWorkers;
-  if (!promoted.includes(conversationId)) {
-    setPrefs({ promotedWorkers: [...promoted, conversationId] });
-  }
 }
 
 // No bulk "mark seen" on row updates: it ran on every poller batch and hid

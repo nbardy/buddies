@@ -5,13 +5,13 @@ import {
 } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { type ReactElement, useState } from 'react';
+import { createConversation } from '../../atoms/commands';
 import { connectionAtom, defaultCwdOf, listField } from '../../atoms/conversations';
-import { prefsAtom } from '../../atoms/ui';
+import { prefsAtom, setLastWorkingDirectory } from '../../atoms/ui';
 import { PathAutocomplete } from '../../components/PathAutocomplete';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { normalizeFolderDirectory, shortenHomePath } from '../../utils/directories';
 import { ConversationConfigPicker } from '../config/ConversationConfigPicker';
-import { type CreateKind, createFromRequest } from './create';
 import './NewConversationForm.css';
 
 /**
@@ -55,13 +55,6 @@ const LAYOUT: Record<
   sheet: { autoFocus: false, quickPicks: 8, ConfigSlot: DefaultConfigSlot },
 };
 
-const ACTION: Record<CreateKind, { label: string; pending: string }> = {
-  chat: { label: 'Create', pending: 'Starting…' },
-  swarm: { label: 'New Swarm', pending: 'Loading swarm context…' },
-};
-
-const KINDS: readonly CreateKind[] = ['chat', 'swarm'];
-
 /** The catalog's first provider is the default (createDefaultConversationConfig's own default until one exists). */
 function catalogDefault(catalog: ProviderCatalog): ConversationConfig {
   return createDefaultConversationConfig(catalog.providers[0]?.id ?? 'claude');
@@ -70,16 +63,13 @@ function catalogDefault(catalog: ProviderCatalog): ConversationConfig {
 export function NewConversationForm({
   layout,
   start,
-  primary,
   onCreated,
   onBusyChange,
 }: {
   layout: NewConversationLayout;
   start: DirectoryStart;
-  /** The action Shift+Enter runs and the one drawn as primary. */
-  primary: CreateKind;
   onCreated: (conversationId: string) => void;
-  /** A swarm create awaits a fetch; the container must not close under it. */
+  /** A create awaits the server; the container must not close under it. */
   onBusyChange: (busy: boolean) => void;
 }) {
   const recentDirectories = useAtomValue(listField('recentDirs'));
@@ -99,7 +89,7 @@ export function NewConversationForm({
   // Null = the user has not picked yet; the catalog default applies, so a
   // catalog that loads after the form opened is not shadowed by 'claude'.
   const [pickedConfig, setPickedConfig] = useState<ConversationConfig | null>(null);
-  const [pending, setPending] = useState<CreateKind | null>(null);
+  const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { autoFocus, quickPicks, ConfigSlot } = LAYOUT[layout];
@@ -108,25 +98,26 @@ export function NewConversationForm({
     catalog !== null &&
     connected &&
     isDirectoryValid &&
-    pending === null &&
+    !pending &&
     directory.trim().length > 0;
 
-  const create = async (kind: CreateKind) => {
+  const create = async () => {
     if (!canCreate) return;
-    setPending(kind);
+    setPending(true);
     setError(null);
     onBusyChange(true);
     try {
+      setLastWorkingDirectory(resolvedDirectory);
       onCreated(
-        await createFromRequest({
-          kind,
+        await createConversation({
           workingDirectory: resolvedDirectory,
           config: pickedConfig ?? catalogDefault(catalog),
+          kind: { t: 'chat' },
         })
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
-      setPending(null);
+      setPending(false);
       onBusyChange(false);
     }
   };
@@ -147,7 +138,7 @@ export function NewConversationForm({
         className="new-conversation__input"
         hasPendingDefault={hasPendingDefault}
         onClearDefault={() => setHasPendingDefault(false)}
-        onConfirm={() => void create(primary)}
+        onConfirm={() => void create()}
         onValidationChange={setIsDirectoryValid}
         autoFocus={autoFocus}
       />
@@ -200,19 +191,16 @@ export function NewConversationForm({
           </output>
         )}
         <div className="new-conversation__actions ui-row">
-          {KINDS.map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              className="new-conversation__action ui-control ui-row"
-              data-primary={kind === primary}
-              onClick={() => void create(kind)}
-              disabled={!canCreate}
-            >
-              {pending === kind ? ACTION[kind].pending : ACTION[kind].label}
-              {kind === primary && <kbd className="new-conversation__kbd">⇧↵</kbd>}
-            </button>
-          ))}
+          <button
+            type="button"
+            className="new-conversation__action ui-control ui-row"
+            data-primary="true"
+            onClick={() => void create()}
+            disabled={!canCreate}
+          >
+            {pending ? 'Starting…' : 'Create'}
+            <kbd className="new-conversation__kbd">⇧↵</kbd>
+          </button>
         </div>
       </div>
     </div>

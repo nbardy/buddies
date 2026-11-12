@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
-import type { CreateKind } from '../../views/new-conversation/create';
 import {
   type DirectoryStart,
   NewConversationForm,
@@ -9,7 +8,7 @@ import {
 
 /**
  * NewConversationSheet — the mobile container for the shared
- * NewConversationForm ("+ New" on Chats and Swarms). The form is the same one
+ * NewConversationForm ("+ New" on Chats). The form is the same one
  * the desktop modal shows; this file is only the sheet around it.
  *
  * Native <dialog> + showModal() rather than a div overlay: focus trapping,
@@ -19,9 +18,9 @@ import {
  */
 
 const DEFAULT_START: DirectoryStart = { t: 'default' };
-const TITLE: Record<CreateKind, string> = { chat: 'New chat', swarm: 'New swarm' };
+const TITLE = 'New chat';
 
-export function NewConversationSheet({ kind, onClose }: { kind: CreateKind; onClose: () => void }) {
+export function NewConversationSheet({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
   const chatRouteState = useMemo(() => mobileConversationRouteState(location), [location]);
@@ -38,7 +37,7 @@ export function NewConversationSheet({ kind, onClose }: { kind: CreateKind; onCl
     <dialog
       ref={dialogRef}
       className="ui-sheet ui-card"
-      aria-label={TITLE[kind]}
+      aria-label={TITLE}
       onCancel={(event) => {
         // Esc while a create is in flight would strand the pending request.
         if (busy) event.preventDefault();
@@ -51,7 +50,7 @@ export function NewConversationSheet({ kind, onClose }: { kind: CreateKind; onCl
       <div className="ui-sheet__inner ui-stack">
         <div className="ui-sheet__grabber" aria-hidden="true" />
         <div className="ui-sheet__header ui-row">
-          <h2 className="ui-sheet__title">{TITLE[kind]}</h2>
+          <h2 className="ui-sheet__title">{TITLE}</h2>
           <button
             type="button"
             className="ui-sheet__close ui-inline-row ui-card ui-muted"
@@ -65,7 +64,6 @@ export function NewConversationSheet({ kind, onClose }: { kind: CreateKind; onCl
         <NewConversationForm
           layout="sheet"
           start={DEFAULT_START}
-          primary={kind}
           onBusyChange={setBusy}
           onCreated={(conversationId) => {
             onClose();

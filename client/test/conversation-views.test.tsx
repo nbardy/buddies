@@ -78,7 +78,7 @@ test('both sub-agent presentations show live agents plus only the last three fin
     agent('live', 'running'),
   ];
   for (const html of [
-    render(<SubAgentPanel presentation="tree" subAgents={subAgents} workingDirectory="/w" />),
+    render(<SubAgentPanel presentation="tree" subAgents={subAgents} />),
     render(<SubAgentPanel presentation="cards" subAgents={subAgents} />),
   ]) {
     assert.match(html, /task live/);

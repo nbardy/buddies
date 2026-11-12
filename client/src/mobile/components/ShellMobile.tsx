@@ -35,13 +35,6 @@ type TabDef = {
 const TABS: readonly TabDef[] = [
   { section: 'chats', label: 'Home', to: '/', end: true, icon: '◈', ariaLabel: 'Home' },
   { section: 'channels', label: 'Channels', to: '/channels', icon: '#', ariaLabel: 'Channels' },
-  {
-    section: 'swarms',
-    label: 'Swarms',
-    to: '/workers',
-    icon: '⬡',
-    ariaLabel: 'Swarms',
-  },
   { section: 'search', label: 'Search', to: '/search', icon: '⌕', ariaLabel: 'Search' },
 ] as const;
 

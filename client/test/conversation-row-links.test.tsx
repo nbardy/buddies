@@ -60,7 +60,6 @@ const VARIANTS: Array<(id: string) => ConversationRowProps> = [
     id,
     worker: false,
     doneView: true,
-    workersView: false,
     connected: true,
   }),
   (id) => ({ variant: 'list', id, routeState: {} }),

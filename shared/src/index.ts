@@ -64,111 +64,6 @@ export function providerSupportsFork(p: Provider): boolean {
 }
 
 // =============================================================================
-// Oompa Runtime Visibility Contract
-// Used by /api/swarm-runtime and all worker-facing UIs.
-//
-// These are DERIVED view types that the server constructs from process state.
-// For the RAW JSON file shapes written by oompa_loompas (run.json,
-// live-summary.json, iteration logs, review logs, summary.json),
-// see shared/src/generated/oompa-types.ts.
-// =============================================================================
-
-/** Worker activity states used for live worker visibility in Workers views. */
-export type OompaWorkerStatus = 'starting' | 'idle' | 'running' | 'done' | 'error';
-
-export interface OompaRuntimeWorker {
-  id: string;
-  status: OompaWorkerStatus;
-  lastEvent: string;
-}
-
-export interface OompaRuntimeRun {
-  runId: string;
-  swarmId: string | null;
-  isRunning: boolean;
-  totalWorkers: number;
-  activeWorkers: number;
-  doneWorkers: number;
-  configPath: string | null;
-  logFile: string | null;
-  workers: OompaRuntimeWorker[];
-  runCount: number;
-}
-
-export interface OompaRuntimeSnapshot {
-  available: boolean;
-  run: OompaRuntimeRun | null;
-  reason: string | null;
-}
-
-// =============================================================================
-// Swarm Run Persistence Types (from oompa agentnet.runs)
-// These are the JSON shapes written to disk by oompa_loompas:
-//   runs/{swarm-id}/run.json       → SwarmRunLog
-//   runs/{swarm-id}/summary.json   → SwarmRunSummary (or server-synthesized)
-//   runs/{swarm-id}/reviews/*.json → SwarmReviewLog
-// Field names use hyphens to match the on-disk JSON keys.
-// =============================================================================
-
-/** Per-worker metrics within a swarm run summary. */
-export interface SwarmRunWorker {
-  id: string;
-  harness: string;
-  model: string;
-  status: string;
-  completed: number;
-  iterations: number;
-  merges: number;
-  rejections: number;
-  errors: number;
-  'review-rounds-total': number;
-}
-
-/** Aggregate summary of a completed (or synthesized) swarm run. */
-export interface SwarmRunSummary {
-  'swarm-id': string;
-  'finished-at': string;
-  /** Present when synthesized from run.json; absent in raw summary.json. */
-  'started-at'?: string;
-  'total-workers': number;
-  'total-completed': number;
-  'total-iterations': number;
-  'status-counts': Record<string, number>;
-  workers: SwarmRunWorker[];
-}
-
-/** Shape of runs/{swarm-id}/run.json — written at swarm start. */
-export interface SwarmRunLog {
-  'swarm-id': string;
-  'started-at': string;
-  'config-file': string;
-  workers: Array<{
-    id: string;
-    harness: string;
-    model: string;
-    iterations: number;
-  }>;
-}
-
-/** Shape of runs/{swarm-id}/reviews/*.json — one per review round. */
-export interface SwarmReviewLog {
-  'worker-id': string;
-  iteration: number;
-  round: number;
-  verdict: string;
-  timestamp: string;
-  output: string;
-  'diff-files': string[];
-}
-
-/** Container pairing a run log with its summary for a single swarm run. */
-export interface SwarmRun {
-  swarmId: string;
-  run: SwarmRunLog | null;
-  summary: SwarmRunSummary | null;
-}
-
-// =============================================================================
 // Client → Server Messages
 // =============================================================================
 
@@ -179,7 +74,6 @@ export const CreateConversationCommandSchema = z.object({
   workingDirectory: z.string().min(1),
   config: ConversationConfigSchema,
   initialMessage: z.string().min(1).optional(),
-  swarmDebugPrefix: z.string().optional(),
   kind: CreateKindSchema,
 });
 export type CreateConversationCommand = z.infer<typeof CreateConversationCommandSchema>;
@@ -273,7 +167,6 @@ export const DeviceUiPrefsSchema = z.object({
   showDoneConversations: z.boolean(),
   showWorkerConversations: z.boolean(),
   lastWorkingDirectory: z.string().nullable(),
-  promotedWorkers: z.array(z.string()),
 });
 
 export type DeviceUiPrefs = z.infer<typeof DeviceUiPrefsSchema>;
@@ -521,13 +414,6 @@ export * from './buddy-channel-posts.js';
 export * from './buddy-workspace-activity.js';
 export * from './dependencies.js';
 export * from './expedition.js';
-// Oompa raw JSON file types (auto-generated from oompa_loompas schemas)
-export type {
-  OompaCycle,
-  OompaReviewLog,
-  OompaStarted,
-  OompaStopped,
-} from './generated/oompa-types.js';
 export * from './harness-retry.js';
 export * from './mobile-access.js';
 export * from './upstream.js';

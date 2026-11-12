@@ -50,7 +50,6 @@ import {
   LOCAL_COMPLETION_SUPPRESS_MS,
   PALETTE_GENERATION_TIMEOUT_MS,
   SHUTDOWN_FLUSH_GRACE_MS,
-  SWARM_CONTEXT_COMMAND_TIMEOUT_MS,
   TURN_MAX_RUNTIME_MS,
 } from './constants/timeouts';
 import {
@@ -120,7 +119,6 @@ import { buildPalettePrompt } from './palettes/prompt';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
 import { createDependencyChecks, registerDependencyRoutes } from './providers/dependencies';
 import { installedAgent } from './providers/installed-agent';
-import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
 import { BackgroundWork } from './turns/background-work';
@@ -556,7 +554,6 @@ const Conversation = createConversationRuntime({
   getConversation: (id) => conversations.get(id),
   executions: executionJournals,
   backgroundWork,
-  readLatestOompaRuntime: readLatestSwarmRuntime,
   createSessionId: uuidv4,
   turnAttempts: turnAttemptObserver,
   history: {
@@ -828,13 +825,6 @@ const isUnderKnownProject = createKnownProjectAuthorizer(knownProjectRoots);
 registerFilesystemRoutes(app, {
   uploadsDirectory: UPLOADS_DIR,
   isUnderKnownProject,
-});
-
-registerSwarmRoutes(app, {
-  isUnderKnownProject,
-  listProjectRoots: knownProjectRoots,
-  resolveWorkingDirectory: resolveWorkingDirectoryInput,
-  commandTimeoutMs: SWARM_CONTEXT_COMMAND_TIMEOUT_MS,
 });
 
 const paletteService = createPaletteService({

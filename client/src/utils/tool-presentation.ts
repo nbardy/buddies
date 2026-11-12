@@ -1,4 +1,4 @@
-import { commandFromDisplayText, detectOompaSubcommand } from '@unleashd/shared';
+import { commandFromDisplayText } from '@unleashd/shared';
 
 const CLAUDE_SUBAGENT_TOOL_NAMES = new Set(['Agent', 'Task']);
 
@@ -42,18 +42,12 @@ const NAMED_ARG = new Map<string, string>([
 ]);
 const GENERIC_ARGS = ['file_path', 'notebook_path', 'pattern', 'path', 'dir_path', 'query'];
 
-function shellSummary(command: string): string {
-  const subcommand = detectOompaSubcommand(command);
-  const oneLine = normalizeLine(command);
-  return subcommand ? `oompa ${subcommand} :: ${oneLine}` : oneLine;
-}
-
 function argSummaryOf(name: string, record: Record<string, unknown>): string {
   const command =
     (typeof record.command === 'string' && record.command) ||
     (typeof record.cmd === 'string' && record.cmd) ||
     null;
-  if (SHELL_TOOL_NAMES.has(name) && command) return shellSummary(command);
+  if (SHELL_TOOL_NAMES.has(name) && command) return normalizeLine(command);
   const named = NAMED_ARG.get(name);
   for (const field of named ? [named, ...GENERIC_ARGS] : GENERIC_ARGS) {
     const value = record[field];
@@ -68,7 +62,7 @@ export function formatToolUse(name: string, input?: unknown, displayText?: strin
   let argSummary = record ? argSummaryOf(name, record) : '';
   if (!argSummary && SHELL_TOOL_NAMES.has(name)) {
     const fallbackCommand = commandFromDisplayText(name, displayText);
-    if (fallbackCommand) argSummary = shellSummary(fallbackCommand);
+    if (fallbackCommand) argSummary = normalizeLine(fallbackCommand);
   }
 
   if (argSummary) {

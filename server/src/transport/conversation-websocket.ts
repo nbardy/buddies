@@ -209,7 +209,6 @@ export function registerConversationWebSocket(
                 workingDirectory,
                 config: data.config,
                 initialMessage: data.initialMessage,
-                swarmDebugPrefix: data.swarmDebugPrefix,
                 resumedFromConversationId: data.kind.t === 'fork' ? data.kind.from : undefined,
                 kind,
                 buddyBriefing: buddyResolution?.briefing,

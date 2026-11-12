@@ -86,7 +86,7 @@ export function Sidebar() {
   const [searchFilterDir, setSearchFilterDir] = useState<string | undefined>(undefined);
   // Null = closed; otherwise where the form's directory field starts.
   const [picker, setPicker] = useState<DirectoryStart | null>(null);
-  const [creatingSwarm, setCreatingSwarm] = useState(false);
+  const [creating, setCreating] = useState(false);
   const { catalog } = useProviderCatalog();
   const [isOpeningBuddyBuilder, setIsOpeningBuddyBuilder] = useState(false);
   const [buddyBuilderError, setBuddyBuilderError] = useState<string | null>(null);
@@ -186,7 +186,7 @@ export function Sidebar() {
   }, []);
 
   const handleCancel = () => {
-    if (!creatingSwarm) setPicker(null);
+    if (!creating) setPicker(null);
   };
 
   // Stable callback: rows are memoized per id, so a new function identity
@@ -260,11 +260,10 @@ export function Sidebar() {
               <NewConversationForm
                 layout="modal"
                 start={picker}
-                primary="chat"
-                onBusyChange={setCreatingSwarm}
+                onBusyChange={setCreating}
                 onCreated={(conversationId) => {
                   setPicker(null);
-                  setCreatingSwarm(false);
+                  setCreating(false);
                   void navigate(`/chat/${conversationId}`);
                 }}
               />

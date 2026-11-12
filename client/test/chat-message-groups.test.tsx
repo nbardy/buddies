@@ -17,7 +17,7 @@ import {
   transcriptFamily,
   transcriptStore,
 } from '../src/atoms/conversations';
-import { lastOwnerText } from '../src/components/buddies/channel-dm';
+
 import { groupChatMessages, regroupChatMessages } from '../src/utils/chat-message-groups';
 import { buildForkDraft, messageTranscriptContent } from '../src/utils/conversation-transcript';
 import { syntheticConversation, syntheticDetail } from './fixtures/synthetic-conversations';
@@ -470,7 +470,7 @@ test('worker launch receipts stay inline in collapsed tool rows on both shells',
       },
     ],
   ]) {
-    const response = groupChatMessages(messages, null)[0];
+    const response = groupChatMessages(messages)[0];
     assert.equal(response.type, 'assistant');
     if (response.type !== 'assistant') throw new Error('Expected response');
     assert.equal(response.parts[0].type, 'tool_calls');
@@ -648,7 +648,7 @@ test('persisted Codex launch tool output rehydrates the worker badge', async () 
       },
     },
   ]);
-  const response = groupChatMessages(messages, null)[0];
+  const response = groupChatMessages(messages)[0];
   assert.equal(response.type, 'assistant');
   if (response.type !== 'assistant' || response.parts[0].type !== 'tool_calls')
     throw new Error('Expected tool row');
@@ -690,7 +690,7 @@ test('a streaming frame rebuilds only the last group, and matches a full regroup
       ...messages[messages.length - 1],
       body: { t: 'text', text: messageTranscriptContent(messages[messages.length - 1]) + text },
     };
-    assert.deepEqual(live, groupChatMessages(streamed, null));
+    assert.deepEqual(live, groupChatMessages(streamed));
   }
 });
 
@@ -713,12 +713,12 @@ test('regrouping after records change matches a full pass for every transcript p
   };
   for (let run = 0; run < 25; run++) {
     const records = Array.from({ length: 30 }, () => roles[next() % roles.length]());
-    let previous = groupChatMessages([], null);
+    let previous = groupChatMessages([]);
     let previousRecords: Message[] = [];
     for (let length = 1; length <= records.length; length++) {
       const current = records.slice(0, length);
-      const regrouped = regroupChatMessages(previous, previousRecords, current, null);
-      assert.deepEqual(regrouped, groupChatMessages(current, null));
+      const regrouped = regroupChatMessages(previous, previousRecords, current);
+      assert.deepEqual(regrouped, groupChatMessages(current));
       // Only the last group may be new.
       for (let i = 0; i < previous.length - 1; i++) assert.equal(regrouped[i], previous[i]);
       previous = regrouped;
@@ -731,39 +731,10 @@ test('regrouping after records change matches a full pass for every transcript p
       body: { t: 'text', text: `${messageTranscriptContent(records[0])}!` },
     };
     assert.deepEqual(
-      regroupChatMessages(previous, previousRecords, replaced, null),
-      groupChatMessages(replaced, null)
+      regroupChatMessages(previous, previousRecords, replaced),
+      groupChatMessages(replaced)
     );
   }
-});
-
-test('mixed user parts retain retry prose and strip the hidden first-turn prefix', () => {
-  const user: Message = {
-    ...message('user', ''),
-    body: {
-      t: 'parts',
-      parts: [
-        { t: 'text', text: 'hidden\n\nVisible request' },
-        { t: 'tool', name: 'attachment', input: { path: '/a' } },
-      ],
-    },
-  };
-  assert.equal(lastOwnerText([user]), 'hidden\n\nVisible request');
-  const grouped = groupChatMessages([user], 'hidden');
-  assert.deepEqual(grouped[0].messages[0].body, {
-    t: 'parts',
-    parts: [
-      { t: 'text', text: 'Visible request' },
-      { t: 'tool', name: 'attachment', input: { path: '/a' } },
-    ],
-  });
-  const draft = buildForkDraft({
-    row: syntheticConversation(1, { id: 'mixed-prefix', cwd: '/tmp/project' }),
-    detail: { ...syntheticDetail('mixed-prefix'), swarmDebugPrefix: 'hidden' },
-    messages: [user],
-  });
-  assert.match(draft, /User: Visible request/);
-  assert.doesNotMatch(draft, /hidden/);
 });
 
 // Regression (task_01a1153f, #case-studies post_01a1151c-e9d6, 2026-10-07): under decision A a
@@ -783,7 +754,7 @@ test('a delivery input saved in owner-chat history renders as a collapsed event,
       timestamp: at,
     },
   ];
-  const groups = groupChatMessages(messages, null);
+  const groups = groupChatMessages(messages);
   const markup = renderToStaticMarkup(
     <MemoryRouter>
       {groups.map((group, index) => (

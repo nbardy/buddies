@@ -108,7 +108,7 @@ function toolLine({ name, input }: Extract<ContentPart, { t: 'tool' }>): string 
       : text;
   return `[tool call] ${name} ${shown}`.trimEnd();
 }
-// One line per part kind; a new kind fails typecheck here instead of rendering as a swarm launch
+// One line per part kind; a new kind fails typecheck here instead of rendering as a stray line
 // (core review B13).
 const PART_LINES: { [K in ContentPart['t']]: (part: Extract<ContentPart, { t: K }>) => string } = {
   text: (part) => cleanProse(part.text),
@@ -116,7 +116,7 @@ const PART_LINES: { [K in ContentPart['t']]: (part: Extract<ContentPart, { t: K 
   question: (part) => `[question] ${JSON.stringify(part.question)}`,
   buddy_builder_result: (part) => `[Buddy Builder result] ${JSON.stringify(part.event)}`,
   buddy_worker_thread: (part) => `[Buddy worker thread] ${JSON.stringify(part.thread)}`,
-  swarm_launch: (part) => `[swarm launch] ${part.command}`,
+  swarm_launch: (part) => `[tool call] ${part.command}`,
 };
 const partLine = <P extends ContentPart>(part: P) =>
   (PART_LINES[part.t] as (part: P) => string)(part);

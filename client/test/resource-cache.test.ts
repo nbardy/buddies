@@ -143,7 +143,7 @@ test('a loader AbortError without cache cancellation is a visible failure', asyn
   assert.equal(read(key).kind, 'failed', 'never leaves the cache stuck loading');
 });
 
-// Guards the deleted `prevProjectsRef` in useSwarmProjects: a failed refresh
+// Guards the deleted per-hook shadow copy of the last value: a failed refresh
 // must keep the last-known value on screen rather than blanking the view, and
 // must still report the error.
 test('a failed refresh keeps the previous value and reports the failure', async () => {
@@ -182,7 +182,7 @@ test('invalidation refreshes mounted keys in place and leaves the rest alone', a
       return 'retained';
     },
   };
-  const unrelated: Resource<string> = { key: '/api/swarm-runs', load: async () => 'untouched' };
+  const unrelated: Resource<string> = { key: '/api/other-runs', load: async () => 'untouched' };
 
   const release = retainResourceKey(live.key);
   await Promise.all([loadResource(live), loadResource(retained), loadResource(unrelated)]);
@@ -196,7 +196,7 @@ test('invalidation refreshes mounted keys in place and leaves the rest alone', a
   const refreshed = read<string>('/api/buddies/live');
   assert.equal(refreshed.kind === 'ready' && refreshed.value, 'v2');
   assert.equal(retainedLoads, 1, 'unmounted keys are not refetched');
-  const untouched = read<string>('/api/swarm-runs');
+  const untouched = read<string>('/api/other-runs');
   assert.equal(untouched.kind === 'ready' && untouched.value, 'untouched');
   release();
 });

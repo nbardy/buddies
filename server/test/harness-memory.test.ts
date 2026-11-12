@@ -52,7 +52,6 @@ test('Buddy turns run with harness auto-memory off; an owner chat keeps it', asy
     invalidateCurrentSession: async () => undefined,
     persistCurrentSession: async () => undefined,
     getConversation: () => undefined,
-    readLatestOompaRuntime: async () => ({ available: false, run: null, reason: 'fixture' }),
     createSessionId: () => 'rotated-session',
     executeTurn: executeCommand,
     buddies: fakeBuddyPort(),

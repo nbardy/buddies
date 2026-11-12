@@ -68,7 +68,6 @@ async function boot(fixture: ReturnType<typeof ingestHome>, allowFreshBriefing =
     persistCurrentSession: async () => undefined,
     buddies: fakeBuddyPort(),
     getConversation: (id) => map.get(id),
-    readLatestOompaRuntime: async () => ({ available: false, run: null, reason: 'fixture' }),
     createSessionId: () => 'fresh-session',
     history: {
       fields: (conversation) =>

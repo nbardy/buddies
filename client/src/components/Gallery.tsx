@@ -52,7 +52,7 @@ function compareConversationsByCreatedAtDesc(
 }
 
 interface GalleryProps {
-  filter?: 'done' | 'workers';
+  filter?: 'done';
 }
 
 export function Gallery({ filter }: GalleryProps = {}) {
@@ -67,7 +67,6 @@ export function Gallery({ filter }: GalleryProps = {}) {
     galleryCollapsedProjects,
     showTempSessions,
     showDoneConversations,
-    promotedWorkers,
     showWorkerConversations,
   } = useAtomValue(prefsAtom);
   const connected = useAtomValue(connectionAtom).socket.tag === 'open';
@@ -82,7 +81,6 @@ export function Gallery({ filter }: GalleryProps = {}) {
     () => new Set(galleryCollapsedProjects),
     [galleryCollapsedProjects]
   );
-  const promotedSet = useMemo(() => new Set(promotedWorkers), [promotedWorkers]);
 
   // Get folder from conversation
   const getFolder = useCallback((conv: ConversationListEntry) => conv.workingDirectory, []);
@@ -160,7 +158,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
       if (conv.done) {
         if (!doneGroupsMap.has(dir)) doneGroupsMap.set(dir, []);
         doneGroupsMap.get(dir)!.push(conv);
-        if (conv.isWorker && !promotedSet.has(conv.id)) {
+        if (conv.isWorker) {
           if (!doneWorkerGroupsMap.has(dir)) doneWorkerGroupsMap.set(dir, []);
           doneWorkerGroupsMap.get(dir)!.push(conv);
         } else if (isTempDirectory(dir)) {
@@ -170,8 +168,8 @@ export function Gallery({ filter }: GalleryProps = {}) {
           if (!doneRealGroupsMap.has(dir)) doneRealGroupsMap.set(dir, []);
           doneRealGroupsMap.get(dir)!.push(conv);
         }
-      } else if (conv.isWorker && !promotedSet.has(conv.id)) {
-        // Worker that hasn't been promoted to main view
+      } else if (conv.isWorker) {
+        // An old oompa transcript: collected under its own collapsed section
         if (!workerGroupsMap.has(dir)) workerGroupsMap.set(dir, []);
         workerGroupsMap.get(dir)!.push(conv);
       } else if (isTempDirectory(dir)) {
@@ -228,14 +226,13 @@ export function Gallery({ filter }: GalleryProps = {}) {
       doneTempGroups: doneTempGroupsMap,
       doneWorkerGroups: doneWorkerGroupsMap,
     };
-  }, [filtered, promotedSet]);
+  }, [filtered]);
 
   const isDoneView = filter === 'done';
   const sortedConversationIds = useMemo(
     () => sortedConversations.map((conv) => conv.id),
     [sortedConversations]
   );
-  const isWorkersView = filter === 'workers';
 
   const getSectionKey = useCallback(
     (projection: Exclude<ProjectProjection, 'done'>, directory: string) =>
@@ -361,7 +358,6 @@ export function Gallery({ filter }: GalleryProps = {}) {
                     id={conv.id}
                     worker={showWorkerBadge}
                     doneView={isDoneView}
-                    workersView={isWorkersView}
                     connected={connected}
                   />
                 ))}
@@ -406,7 +402,6 @@ export function Gallery({ filter }: GalleryProps = {}) {
       showDoneBySection,
       toggleSectionDoneVisibility,
       isDoneView,
-      isWorkersView,
       connected,
     ]
   );
@@ -441,26 +436,6 @@ export function Gallery({ filter }: GalleryProps = {}) {
     );
   }
 
-  if (isWorkersView && workerSessionCount === 0) {
-    return (
-      <div className="gallery-view ui-stack">
-        <div className="gallery-done-header ui-row">
-          <button
-            type="button"
-            className="back-to-gallery-btn ui-control"
-            onClick={() => navigate('/chats')}
-          >
-            &#8592; Gallery
-          </button>
-          <h2>Worker Conversations</h2>
-        </div>
-        <div className="empty-state ui-muted">
-          No worker conversations. Workers are detected by the [oompa] prefix in the first message.
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="gallery-view ui-stack">
       {isDoneView ? (
@@ -474,17 +449,6 @@ export function Gallery({ filter }: GalleryProps = {}) {
           </button>
           <h2>Done Conversations ({doneSessionCount})</h2>
         </div>
-      ) : isWorkersView ? (
-        <div className="gallery-done-header ui-row">
-          <button
-            type="button"
-            className="back-to-gallery-btn ui-control"
-            onClick={() => navigate('/chats')}
-          >
-            &#8592; Gallery
-          </button>
-          <h2>Worker Sessions ({workerSessionCount})</h2>
-        </div>
       ) : (
         <FolderFilter
           folders={folders}
@@ -497,9 +461,8 @@ export function Gallery({ filter }: GalleryProps = {}) {
         />
       )}
       <div className="gallery-content ui-stack">
-        {/* Regular project groups — hidden in done/workers view */}
+        {/* Regular project groups — hidden in done view */}
         {!isDoneView &&
-          !isWorkersView &&
           projectGroups.map((group) =>
             renderProjectSection({
               group,
@@ -507,8 +470,8 @@ export function Gallery({ filter }: GalleryProps = {}) {
             })
           )}
 
-        {/* Temp sessions toggle and groups — hidden in done/workers view */}
-        {!isDoneView && !isWorkersView && tempSessionCount > 0 && (
+        {/* Temp sessions toggle and groups — hidden in done view */}
+        {!isDoneView && tempSessionCount > 0 && (
           <div className="temp-sessions-section">
             <button
               type="button"
@@ -539,11 +502,10 @@ export function Gallery({ filter }: GalleryProps = {}) {
           </div>
         )}
 
-        {/* Worker conversations — shown in workers view, toggleable in main view */}
-        {(isWorkersView || workerSessionCount > 0) && !isDoneView && (
+        {/* Old oompa transcripts (kind worker): a collapsed section of the main view */}
+        {workerSessionCount > 0 && !isDoneView && (
           <div className="worker-sessions-section">
-            {!isWorkersView && (
-              <button
+            <button
                 type="button"
                 className="worker-sessions-toggle ui-control ui-row"
                 onClick={() => setShowWorkerConversations(!showWorkerConversations)}
@@ -553,11 +515,10 @@ export function Gallery({ filter }: GalleryProps = {}) {
                 </span>
                 {showWorkerConversations ? 'Hide' : 'Show'} {workerSessionCount} worker session
                 {workerSessionCount !== 1 ? 's' : ''}
-                <span className="worker-sessions-hint ui-muted">(oompa-spawned)</span>
-              </button>
-            )}
+                <span className="worker-sessions-hint ui-muted">(old oompa runs)</span>
+            </button>
 
-            {(isWorkersView || showWorkerConversations) &&
+            {showWorkerConversations &&
               workerGroups.map((group) =>
                 renderProjectSection({
                   group,
@@ -571,7 +532,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
         )}
 
         {/* Done conversations toggle and groups — always expanded in done view */}
-        {doneSessionCount > 0 && !isWorkersView && (
+        {doneSessionCount > 0 && (
           <div className="done-sessions-section">
             {!isDoneView && (
               <button

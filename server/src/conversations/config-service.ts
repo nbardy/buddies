@@ -400,7 +400,6 @@ function fingerprintAtCurrentConfig(existing: ConversationRecord): string | null
     workingDirectory: existing.workingDirectory,
     config: existing.config,
     initialMessage: creation.initialMessage,
-    swarmDebugPrefix: creation.swarmDebugPrefix,
     resumedFromConversationId: creation.resumedFromConversationId,
     kind: existing.kind,
     branch: creation.branch,

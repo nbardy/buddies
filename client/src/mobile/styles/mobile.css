@@ -389,7 +389,7 @@ body:has(.mobile-shell[data-scroll="page"]) #root {
   display: none;
 }
 
-/* ConversationListMobile page root (moved from the deleted swarm/mobile/mobile-swarm.css). */
+/* ConversationListMobile page root. */
 .mobile-chats {
   min-width: 0;
 }

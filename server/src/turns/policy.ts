@@ -139,18 +139,6 @@ export interface TurnPolicy {
   ): Promise<void>;
 }
 
-/** The first-turn prefix a general chat carries: the swarm debug header, once. */
-export function chatFirstTurnPrompt(input: {
-  content: string;
-  firstUnstartedTurn: boolean;
-  swarmDebugPrefix: string | null;
-}): string {
-  if (input.swarmDebugPrefix !== null && input.firstUnstartedTurn) {
-    return `<!-- unleashd:swarm-prefix -->\n${input.swarmDebugPrefix}\n<!-- /unleashd:swarm-prefix -->\n\n${input.content}`;
-  }
-  return input.content;
-}
-
 /** Successful tool receipts every kind renders into the transcript. */
 export function commonToolResultParts(output: unknown): ContentPart[] {
   return parseBuddyWorkerToolResult(output).map((thread) => ({ t: 'buddy_worker_thread', thread }));
@@ -200,22 +188,15 @@ export abstract class NoRunPolicy {
 
 /** A general chat: no admission, briefing, grants or memory. */
 export class ChatTurnPolicy extends NoRunPolicy implements TurnPolicy {
-  constructor(
-    private readonly swarmDebugPrefix: () => string | null,
-    readonly carrier: InputCarrier
-  ) {
+  constructor(readonly carrier: InputCarrier) {
     super();
   }
 
   admitClaim(): void {
     throw new Error('A chat has no chat runs');
   }
-  providerPrompt(turn: { content: string; messageCount: number; hasStartedSession: boolean }) {
-    return chatFirstTurnPrompt({
-      content: turn.content,
-      firstUnstartedTurn: turn.messageCount === 0 && !turn.hasStartedSession,
-      swarmDebugPrefix: this.swarmDebugPrefix(),
-    });
+  providerPrompt(turn: { content: string }) {
+    return turn.content;
   }
   preflight(): void {}
   startTurn() {

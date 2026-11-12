@@ -5,7 +5,6 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { AskUserQuestionWidget } from '../../components/AskUserQuestion';
 import { BuddyBuilderResultCard } from '../../components/buddies/BuddyBuilderResultCard';
-import { InlineSwarmRunWidget } from '../../swarm';
 import { ChatActivity } from '../../ui/ChatActivity';
 import type { AssistantResponse, MessageGroup } from '../../utils/chat-message-groups';
 import {
@@ -125,7 +124,9 @@ const MessageContent = memo(
             case 'buddy_worker_thread':
               return null;
             case 'swarm_launch':
-              return <InlineSwarmRunWidget key={index} workingDirectory={workingDirectory} />;
+              // Legacy stored part (parts_json of old oompa launches); no longer produced and
+              // shown as the plain command.
+              return renderText(`🔧 ${part.command}`, index);
             default:
               return unreachable(part);
           }

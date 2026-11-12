@@ -25,7 +25,7 @@ export interface Resource<T> {
  * `stale` is the reason this is a sum rather than `{data, loading, error}`:
  * a failed refresh over a value we already hold is a distinct state from a
  * failure with nothing to show, and collapsing them is what forced
- * `useSwarmProjects` to keep its own `prevProjectsRef` shadow copy.
+ * callers to keep their own shadow copy of the last value.
  */
 export type ResourceEntry<T> =
   | { kind: 'idle' }

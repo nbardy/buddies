@@ -4,7 +4,6 @@ import { memo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { setConversationDone } from '../../atoms/actions';
 import { rowFamily, unreadFamily } from '../../atoms/conversations';
-import { promoteWorker } from '../../atoms/ui';
 import { useTimeTick } from '../../hooks/useTimeTick';
 import { isRowRunning } from '../../utils/conversation-row';
 import { normalizeFolderDirectory, shortenHomePath } from '../../utils/directories';
@@ -43,7 +42,6 @@ export type ConversationRowProps =
       id: string;
       worker: boolean;
       doneView: boolean;
-      workersView: boolean;
       connected: boolean;
     }
   | { variant: 'list'; id: string; routeState: Record<string, unknown> };
@@ -187,17 +185,9 @@ function SidebarRow({
   );
 }
 
-// ── card: the Gallery tile — id + provider, state, Restore/Promote, label ──
+// ── card: the Gallery tile — id + provider, state, Restore, label ──
 
-function CardAction({
-  conv,
-  worker,
-  connected,
-}: {
-  conv: Row;
-  worker: boolean;
-  connected: boolean;
-}) {
+function CardAction({ conv, connected }: { conv: Row; connected: boolean }) {
   const navigate = useNavigate();
   if (conv.done) {
     return (
@@ -218,27 +208,17 @@ function CardAction({
       </button>
     );
   }
-  if (!worker) return null;
-  return (
-    <button
-      type="button"
-      className="conversation-row__card-action ui-card"
-      onClick={() => promoteWorker(conv.id)}
-    >
-      Promote
-    </button>
-  );
+  return null;
 }
 
 function CardRow({
   facts,
   worker,
   doneView,
-  workersView,
   connected,
 }: { facts: RowFacts } & Extract<ConversationRowProps, { variant: 'card' }>) {
   const { conv } = facts;
-  const dimmed = (conv.done && !doneView) || (worker && !workersView && !conv.done);
+  const dimmed = (conv.done && !doneView) || (worker && !conv.done);
   const running = facts.status === 'running';
   return (
     <div
@@ -256,7 +236,7 @@ function CardRow({
           </span>
         </div>
         <div className="conversation-row__card-status ui-row">
-          <CardAction conv={conv} worker={worker} connected={connected} />
+          <CardAction conv={conv} connected={connected} />
           <span className="conversation-row__state ui-inline-row ui-muted">
             <StatusDot status={facts.status} />
             {running ? 'Running' : `Idle · ${facts.timeAgo}`}

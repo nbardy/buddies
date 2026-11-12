@@ -28,6 +28,7 @@ export const ContentPartSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('question'), question: AskUserQuestionSchema }),
   z.object({ t: z.literal('buddy_builder_result'), event: BuddyBuilderEventSchema }),
   z.object({ t: z.literal('buddy_worker_thread'), thread: BuddyWorkerThreadSchema }),
+  // Legacy: stored parts of old `oompa run` launches (ingest parts_json). Never produced now.
   z.object({ t: z.literal('swarm_launch'), command: z.string() }),
 ]);
 export type ContentPart = z.infer<typeof ContentPartSchema>;

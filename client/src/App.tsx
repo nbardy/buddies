@@ -18,7 +18,6 @@ import { UpdateBanner } from './components/UpdateBanner';
 import { useWebSocket } from './hooks/useWebSocket';
 import { type DeviceKind, useDeviceKind } from './mobile/hooks/useDeviceKind';
 import { initSettings } from './stores/settingsStore';
-import { SWARM_PAGE_LOADERS } from './swarm';
 import { ConnectMobile } from './views/dependencies/ConnectMobile';
 import { DependenciesPrompt } from './views/dependencies/DependenciesPrompt';
 import './App.css';
@@ -65,7 +64,7 @@ function useWebSocketBridge() {
 type AnyComponent = ComponentType<any>;
 
 // Pattern: fix-guards (docs/patterns.md#fix-guards)
-// Warming every route at startup loaded 15 unused swarm modules/styles on /buddies.
+// Warming every route at startup loaded unused route modules/styles on /buddies.
 // Load routes on use; guard: tools/check-route-loading.mjs.
 /** A named export loaded on first render. */
 function lazyNamed<C extends AnyComponent>(load: () => Promise<C>): LazyExoticComponent<C> {
@@ -81,9 +80,6 @@ const ChatRoute = lazyNamed(() => import('./components/Chat').then((m) => m.Chat
 const BuddiesDashboard = lazyNamed(() =>
   import('./components/BuddiesDashboard').then((m) => m.BuddiesDashboard)
 );
-const SwarmDashboard = lazyNamed(SWARM_PAGE_LOADERS.dashboard);
-const SwarmDetail = lazyNamed(SWARM_PAGE_LOADERS.detail);
-const SwarmAnalytics = lazyNamed(SWARM_PAGE_LOADERS.analytics);
 const WorkspaceSlack = lazyNamed(() =>
   import('./components/buddies/ChannelBrowser').then((m) => m.WorkspaceSlack)
 );
@@ -158,21 +154,6 @@ const ROUTES: RouteDef[] = [
     path: '/buddies/:buddyId/:tab',
     desktop: () => <BuddiesDashboard />,
     mobile: () => <BuddyDetailMobile />,
-  },
-  {
-    path: '/workers',
-    desktop: () => <SwarmDashboard layout="wide" />,
-    mobile: () => <SwarmDashboard layout="narrow" />,
-  },
-  {
-    path: '/workers/detail',
-    desktop: () => <SwarmDetail layout="wide" />,
-    mobile: () => <SwarmDetail layout="narrow" />,
-  },
-  {
-    path: '/workers/analytics',
-    desktop: () => <SwarmAnalytics layout="wide" />,
-    mobile: () => <SwarmAnalytics layout="narrow" />,
   },
   {
     path: '/done',

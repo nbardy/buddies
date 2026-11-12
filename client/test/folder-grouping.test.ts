@@ -8,9 +8,8 @@ import { folderGroupKey, normalizeFolderDirectory } from '../src/utils/directori
  * group header: 1,107 groups for room-runners-arena-lib alone, each rendering
  * as the same truncated `~/git/room-runners-aren…` with one thread under it.
  *
- * The fold lives in `getProjectRoot`, which is shared with the Swarm dashboard.
- * Narrowing that regex there would silently shatter the sidebar again, and
- * nothing else asserts the sidebar depends on it.
+ * The fold lives in `getProjectRoot`. Narrowing that regex would silently
+ * shatter the sidebar again for old oompa transcripts still on disk.
  */
 test('sibling worktrees of one repo collapse to a single sidebar group', () => {
   const repo = '/Users/nick/git/room-runners-arena-lib';

@@ -26,7 +26,6 @@ import './WorkspaceHome.css';
 const DESTINATIONS = [
   { to: '/chats', label: 'Chats' },
   { to: '/buddies', label: 'Buddies' },
-  { to: '/workers', label: 'Workers' },
 ] as const;
 
 const channelsPath = (workspaceId: string) =>

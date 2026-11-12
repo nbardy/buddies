@@ -434,8 +434,7 @@ test('a failed turn shows its system message in the DM rows', async () => {
         message('user', 'hello', 1),
         message('assistant', '', 1),
         message('system', "Couldn't start codex: the `codex` command was not found.", 1),
-      ],
-      null
+      ]
     ),
     []
   );

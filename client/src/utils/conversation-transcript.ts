@@ -36,35 +36,12 @@ export function messageTranscriptContent(message: Message): string {
         case 'buddy_worker_thread':
           return `[Buddy worker thread] ${part.thread.label}`;
         case 'swarm_launch':
-          return `[Swarm launch] ${part.command}`;
+          return `[tool call] ${part.command}`;
         default:
           return unreachable(part);
       }
     })
     .join('\n');
-}
-
-/** Remove the machine preamble from the first user record, including mixed native blocks. */
-export function stripFirstMessagePrefix(message: Message, prefix: string): Message {
-  if (message.body.t === 'text')
-    return message.body.text.startsWith(prefix)
-      ? {
-          ...message,
-          body: { t: 'text', text: message.body.text.slice(prefix.length).replace(/^\n\n/, '') },
-        }
-      : message;
-  const first = message.body.parts[0];
-  if (first?.t !== 'text' || !first.text.startsWith(prefix)) return message;
-  return {
-    ...message,
-    body: {
-      t: 'parts',
-      parts: [
-        { t: 'text', text: first.text.slice(prefix.length).replace(/^\n\n/, '') },
-        ...message.body.parts.slice(1),
-      ],
-    },
-  };
 }
 
 export function buildThreadTranscript({ row, detail, messages }: OpenConversation): string {
@@ -82,17 +59,8 @@ export function buildThreadTranscript({ row, detail, messages }: OpenConversatio
     '---',
   ].join('\n');
 
-  // The swarm debug preamble is a machine prefix on the first user message
-  // (the server sets it only on chats). Strip it here too, or every fork
-  // re-injects the preamble as if the user typed it.
-  const prefix = detail.swarmDebugPrefix;
   const body = messages
-    .map((msg, index) => {
-      const content = messageTranscriptContent(
-        index === 0 && msg.role === 'user' && prefix ? stripFirstMessagePrefix(msg, prefix) : msg
-      );
-      return `${msg.role === 'user' ? 'User' : 'Assistant'}: ${content}`;
-    })
+    .map((msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${messageTranscriptContent(msg)}`)
     .join('\n\n');
 
   return body ? `${header}\n\n${body}` : header;

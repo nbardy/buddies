@@ -1,13 +1,12 @@
 import type { ConversationRow } from '@unleashd/shared';
 
-export type MobilePrimarySection = 'chats' | 'channels' | 'swarms' | 'buddies' | 'search';
+export type MobilePrimarySection = 'chats' | 'channels' | 'buddies' | 'search';
 
 // First match wins, so channels precedes buddies. Channels live under
 // /buddies/workspaces/:id/channels; /channels is the tab's entry point.
 const SECTION_PATHS: Record<Exclude<MobilePrimarySection, 'chats'>, RegExp> = {
   channels: /^\/channels$|^\/buddies\/workspaces\/[^/]+\/channels\/?$/,
   buddies: /^\/buddies(\/|$)/,
-  swarms: /^\/workers(\/|$)/,
   search: /^\/search(\/|$)/,
 };
 
@@ -95,7 +94,6 @@ export function fallbackMobileConversationDestination(
       return { path: `/buddies/${encodeURIComponent(kind.buddyId)}/${tab}`, section: 'buddies' };
     }
     case 'worker':
-      return { path: '/workers', section: 'swarms' };
     case 'chat':
       return { path: '/chats', section: 'chats' };
   }

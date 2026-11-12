@@ -50,7 +50,7 @@ export function MobileSection({ title, meta, className, children }: MobileSectio
 }
 
 /**
- * Primary action in a page header — the "+ New" affordance on Chats, Swarms and
+ * Primary action in a page header — the "+ New" affordance on Chats and
  * Buddies. Sized to the 44px tap target so it stays reachable one-handed.
  */
 export function MobileHeaderAction({

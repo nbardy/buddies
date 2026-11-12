@@ -20,7 +20,6 @@ import {
   MessagePageSchema,
   buddyKind,
   createDefaultConversationConfig,
-  detectOompaSubcommand,
 } from '@unleashd/shared';
 import express from 'express';
 import type { ConversationRegistry } from '../src/application/context';
@@ -80,7 +79,6 @@ async function serve(
     persistCurrentSession: async () => undefined,
     buddies: fakeBuddyPort(),
     getConversation: (id) => registry.get(id),
-    readLatestOompaRuntime: async () => ({ available: false, run: null, reason: 'fixture' }),
     createSessionId: () => 'fresh-session',
     history: {
       fields: (conversation) =>
@@ -529,13 +527,6 @@ test('the route pages a forked record exactly as the JS merge slices it', async 
     await server.close();
     fixture.cleanup();
   }
-});
-
-test('detectOompaSubcommand still sees quoted and wrapped oompa launches', () => {
-  assert.equal(detectOompaSubcommand('oompa swarm x.json'), 'swarm');
-  assert.equal(detectOompaSubcommand('bash -lc "cd /x && OOMPA run y.json"'), 'run');
-  assert.equal(detectOompaSubcommand('"/usr/bin/oom"\'pa\' swarm z.json'), 'swarm');
-  assert.equal(detectOompaSubcommand('ls -la && git status'), null);
 });
 
 // Fix-guard: eager recovery built one runtime per app-created record (8,176 on 2026-10-23, 4.0 s of

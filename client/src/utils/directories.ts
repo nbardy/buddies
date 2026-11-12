@@ -38,8 +38,8 @@ export function folderGroupKey(workingDirectory: string): string {
 /*
  * Worktree folding. Oompa workers and Claude Code run in git worktrees under the
  * project root (`<repo>/.w<id>-i<iter>`, `<repo>/.workers/worker-N`,
- * `<repo>/.claude/worktrees/<branch>`). Moved here from swarmUtils (T10) because
- * folder grouping is core and must survive deleting the swarm viewer.
+ * `<repo>/.claude/worktrees/<branch>`). The oompa viewer is gone, but its old transcripts
+ * are still on disk and must keep folding into one group (folder-grouping.test.ts).
  */
 
 /**

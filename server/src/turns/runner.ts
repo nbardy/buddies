@@ -27,7 +27,6 @@ import type {
   TurnAttemptActivity,
   TurnTerminalCause,
 } from '../observability';
-import { type SwarmObservers, watchSwarmRuns } from '../swarm';
 import type { BackgroundWork } from './background-work';
 import type { Effect, Execution, ExecutionOutcome, Phase, StopIntent } from './execution-state';
 import type { ExecutionJournals, TurnOwner } from './executions';
@@ -116,7 +115,6 @@ export interface TurnRunnerPorts {
   /** Where each turn's execution is journaled, so a replacement backend can adopt it. */
   executions: ExecutionJournals;
   turnAttempts: RuntimeTurnAttemptObserver;
-  swarmObservers: SwarmObservers;
   /** Which background tasks of a turn finished, for a turn whose model is idle (background-work.ts). */
   backgroundWork: BackgroundWork;
 }
@@ -155,8 +153,6 @@ export class TurnRunner {
   private nextAttempt: string | null = null;
   // Chosen once per turn from the harness capability table (turns/subagents.ts).
   private subAgentFold: SubAgentFold = subAgentFoldFor('claude');
-  // This turn's subscription to its folder's swarm observer (swarm/observer.ts).
-  private stopSwarmWatch: (() => void) | null = null;
   // The max budget is passed explicitly: foreground Buddy turns never inherit a shorter
   // claim default (docs/incident-2026-09-10-buddy-chat-timeout.md).
   private readonly watchdog = new TurnWatchdog(
@@ -589,7 +585,6 @@ export class TurnRunner {
     // The same signal renews a Buddy run's lease: a live bridge means a live holder (lease ≠
     // deadline; see BuddyTurnPolicy.bridgeAlive).
     this.host.policy.bridgeAlive();
-    this.ports.swarmObservers.poke(this.host.policy.turnDirectory(this.host.workingDirectory));
   }
 
   sawOutput(): void {
@@ -999,19 +994,11 @@ export class TurnRunner {
   }
 
   clearWatchdogs(): void {
-    this.stopSwarmWatch?.();
-    this.stopSwarmWatch = null;
     this.watchdog.clear();
   }
 
   private startWatchdogs(): void {
     this.watchdog.start(this.processStartTime, this.host.policy.maxRuntimeMs);
-    this.stopSwarmWatch?.();
-    this.stopSwarmWatch = watchSwarmRuns(
-      this.ports.swarmObservers,
-      this.host.policy.turnDirectory(this.host.workingDirectory),
-      this.subAgentHost
-    );
   }
 
   broadcastStatus(): void {

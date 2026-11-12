@@ -1,7 +1,6 @@
 import type { ConversationRow, RowKind } from '@unleashd/shared';
 import {
   folderGroupKey,
-  getProjectRoot,
   isWorktreeDirectory,
   normalizeFolderDirectory,
 } from '../utils/directories';
@@ -262,8 +261,6 @@ export interface ListIndex {
   readonly buddyThreads: ReadonlyMap<string, BuddyThreads>;
   /** Latest Buddy activity per workspace. */
   readonly workspaceActivity: ReadonlyMap<string, number>;
-  /** Swarm worker ids (not promoted) per project root (T10: quarantined swarm). */
-  readonly workersByProject: ReadonlyMap<string, readonly string[]>;
 }
 
 const CHAT_INBOX_LIMIT = 50;
@@ -280,12 +277,10 @@ function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 }
 
 /**
- * One pass over the newest-first list. `promoted` are worker ids the user
- * promoted into the main views. `now` dates the sidebar's "recent" cutoff.
+ * One pass over the newest-first list. `now` dates the sidebar's "recent" cutoff.
  */
 export function buildListIndex(
   list: readonly ConversationListEntry[],
-  promoted: ReadonlySet<string>,
   now: number
 ): ListIndex {
   const order: string[] = [];
@@ -296,7 +291,6 @@ export function buildListIndex(
   }
   const listedChild = (entry: ConversationListEntry) =>
     entry.parentConversationId !== null && idSet.has(entry.parentConversationId);
-  const hiddenWorker = (entry: ConversationListEntry) => entry.isWorker && !promoted.has(entry.id);
 
   const dirs = new Set<string>();
   const inboxIds: string[] = [];
@@ -311,7 +305,6 @@ export function buildListIndex(
   const foreground = new Map<string, ConversationListEntry[]>();
   const background = new Map<string, ConversationListEntry[]>();
   const workspaceActivity = new Map<string, number>();
-  const workers = new Map<string, string[]>();
   const cutoff = now - RECENT_CUTOFF_MS;
 
   for (const entry of list) {
@@ -329,9 +322,6 @@ export function buildListIndex(
       inboxTotal += 1;
       if (inboxIds.length < CHAT_INBOX_LIMIT) inboxIds.push(entry.id);
     }
-    if (entry.isWorker && !promoted.has(entry.id)) {
-      pushTo(workers, getProjectRoot(entry.workingDirectory), entry.id);
-    }
     if (entry.buddyWorkspaceId !== null && !workspaceActivity.has(entry.buddyWorkspaceId)) {
       workspaceActivity.set(entry.buddyWorkspaceId, entry.activityMs);
     }
@@ -341,7 +331,7 @@ export function buildListIndex(
       else if (!entry.isWorker && entry.parentConversationId === null)
         pushTo(foreground, entry.buddyId, entry);
     }
-    if (hiddenWorker(entry) || child) continue;
+    if (entry.isWorker || child) continue;
     if (entry.kind === 'builder') builders.push(entry);
     // Folder rows: not Buddy threads (own section), not Builder (own folder).
     if (entry.kind === 'buddy' || entry.kind === 'builder') continue;
@@ -393,7 +383,6 @@ export function buildListIndex(
     builders,
     buddyThreads,
     workspaceActivity,
-    workersByProject: workers,
   };
 }
 
@@ -427,7 +416,6 @@ const FIELD_EQUALS: { [K in keyof ListIndex]: (a: ListIndex[K], b: ListIndex[K])
   builders: sameItems,
   buddyThreads: (a, b) => sameMap(a, b, sameThreads),
   workspaceActivity: (a, b) => sameMap(a, b),
-  workersByProject: (a, b) => sameMap(a, b, sameItems),
 };
 
 /** Keep each field of `previous` whose content `next` did not change. */

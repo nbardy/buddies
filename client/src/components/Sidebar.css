@@ -32,7 +32,7 @@
   align-items: center;
 }
 
-/* Universal search field — input-like pill, searches all (chats/swarms/buddies) */
+/* Universal search field — input-like pill, searches all (chats/buddies) */
 .sidebar-search-field {
   gap: var(--sp-3);
   min-width: 0;
@@ -82,7 +82,7 @@
   background: color-mix(in srgb, var(--bg-base) 60%, transparent);
 }
 
-/* Universal new — creates a conversation (buddy/swarm are just conversations) */
+/* Universal new — creates a conversation */
 .sidebar-new-btn {
   justify-content: center;
   gap: var(--sp-2);

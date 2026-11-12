@@ -191,8 +191,6 @@ export const ConversationDetailSchema = z.object({
   subAgents: z.array(SubAgentSchema),
   latestTurn: TurnObservationSchema,
   latestAttempt: TurnAttemptSnapshotSchema.nullable().default(null),
-  /** Swarm debug prefix hidden from the first message (chat kind only). */
-  swarmDebugPrefix: z.string().nullable(),
 });
 export type ConversationDetail = z.infer<typeof ConversationDetailSchema>;
 

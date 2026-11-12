@@ -11,10 +11,3 @@ export type BuddyRowKind = Extract<RowKind, { t: 'buddy' }>;
 export function rowBuddy(row: { kind: RowKind } | null | undefined): BuddyRowKind | null {
   return row?.kind.t === 'buddy' ? row.kind : null;
 }
-
-export type WorkerRowKind = Extract<RowKind, { t: 'worker' }>;
-
-/** The swarm ids of a worker row (quarantined swarm, DESIGN C.5), or null. */
-export function rowWorker(row: { kind: RowKind } | null | undefined): WorkerRowKind | null {
-  return row?.kind.t === 'worker' ? row.kind : null;
-}

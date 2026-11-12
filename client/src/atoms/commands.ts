@@ -89,7 +89,6 @@ function sendCreate(command: CreateCommand): void {
     workingDirectory: command.args.workingDirectory,
     config: command.args.config,
     initialMessage: command.args.initialMessage,
-    swarmDebugPrefix: command.args.swarmDebugPrefix,
     kind: command.args.kind,
   };
   // Closed: the command stays `sent` and `resendOnHello` delivers it.

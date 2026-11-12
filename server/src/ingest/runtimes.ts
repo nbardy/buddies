@@ -130,7 +130,6 @@ export function createRuntimeBuilder(dependencies: RuntimeBuilderDependencies): 
       existingSessionAudienceKey: currentSession?.buddyAudienceKey,
       // Provider-counted context measured before the restart keeps the meter honest.
       existingProviderUsage: currentSession?.latestUsage ?? null,
-      swarmDebugPrefix: record.creation?.swarmDebugPrefix ?? current?.swarmDebugPrefix ?? null,
       resumedFromConversationId:
         record.creation?.resumedFromConversationId ?? joined?.row?.resumedFrom ?? null,
       parentConversationId: joined?.row?.parent ?? null,
