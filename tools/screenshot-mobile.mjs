@@ -50,18 +50,11 @@ function parseArgs(argv) {
 function buildScreens(ids) {
   return [
     { name: '01-chats', path: '/' },
-    { name: '02-swarms', path: '/workers' },
     { name: '03-buddies', path: '/buddies' },
     { name: '04-search', path: '/search' },
     {
       name: '05-new-chat-sheet',
       path: '/',
-      prepare: `document.querySelector('.mobile-ui-header-action')?.click()`,
-      settleMs: 700,
-    },
-    {
-      name: '06-new-swarm-sheet',
-      path: '/workers',
       prepare: `document.querySelector('.mobile-ui-header-action')?.click()`,
       settleMs: 700,
     },
@@ -109,13 +102,6 @@ function buildScreens(ids) {
           settleMs: 2000,
         }))
       : []),
-    ids.swarmProject
-      ? {
-          name: '13-swarm-detail',
-          path: `/workers/detail?project=${encodeURIComponent(ids.swarmProject)}`,
-          settleMs: 2000,
-        }
-      : null,
   ].filter(Boolean);
 }
 
@@ -134,7 +120,7 @@ async function main() {
   try {
     await session.setViewport(VIEWPORT);
 
-    // Discover real ids from the running app so conversation/buddy/swarm
+    // Discover real ids from the running app so conversation/buddy
     // screens point at something that exists.
     await goto(`${args.url}/`, 2500);
     const ids = await evaluate(`(() => {
@@ -167,7 +153,6 @@ async function main() {
     };
 
     ids.buddyId = await idFromFirstCard('/buddies', '.mobile-buddy-card', /^\/buddies\/([^?]+)/);
-    ids.swarmProject = await idFromFirstCard('/workers', '.mobile-swarm-card', /project=([^&]+)/);
 
     const screens = buildScreens(ids).filter(
       (s) => !args.only || args.only.has(s.name.replace(/^\d+-/, ''))

@@ -249,12 +249,6 @@ async function discoverConversation(baseUrl, token) {
   return longest ? { conversationId: longest.id, messageCount: longest.messageCount } : null;
 }
 
-/** First swarm project with a recorded run; the dashboard lists the same set. */
-async function discoverSwarm(api) {
-  const { projects } = await api('/api/swarm-projects');
-  return projects[0]?.projectRoot ?? null;
-}
-
 /**
  * Expeditions to shoot: the live one that
  * shows the most (waiting on the owner first, then running), and a finished one. Each opens in the
@@ -311,7 +305,6 @@ async function discover(api, args, token) {
     // The first active Buddy of the discovered workspace (its detail tabs are screens).
     ...buddy,
     directConversationId: direct?.generations?.at(-1) ?? null,
-    swarmProject: await discoverSwarm(api),
     ...(await discoverExpeditions(api)),
   };
 }
@@ -538,7 +531,6 @@ export function buildScreens(found, focus) {
   const thread = found.threadRootId && `${channels}?${channel}&thread=${enc(found.threadRootId)}`;
   const noThread = noChannel ?? (thread ? null : 'no thread with replies in this channel');
   const noFocus = noThread ?? (focus ? null : 'needs --focus <text in a thread post>');
-  const swarm = found.swarmProject && `/workers/detail?project=${enc(found.swarmProject)}`;
   /** One expedition, in the Channels pane of its own workspace. */
   const expeditionPath = (k) =>
     k && `/buddies/workspaces/${enc(k.workspaceId)}/channels?expedition=${enc(k.id)}`;
@@ -867,10 +859,6 @@ export function buildScreens(found, focus) {
     },
     { name: 'focus', missing: noFocus, views: onBoth(thread, focus && scrollToText(focus)) },
     { name: 'task-hover', missing: noFocus, views: onBoth(thread, focus && hoverTaskIn(focus)) },
-    // ── Swarm (quarantined, still shipped) ──
-    { name: 'swarm', missing: null, views: onBoth('/workers') },
-    { name: 'swarm-detail', missing: swarm ? null : 'no swarm project', views: onBoth(swarm) },
-    { name: 'swarm-analytics', missing: null, views: onBoth('/workers/analytics') },
   ];
 }
 

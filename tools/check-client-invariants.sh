@@ -119,7 +119,7 @@ echo "==> Gate G6: one owner per CSS class — the same class defined in two .cs
 # CSS here is global (plain .css imports, no modules). Two files defining the
 # same class silently fight over the cascade: import order picks the winner and
 # the loser leaves no trace. This cost real debugging time when a header chip
-# picked up SwarmDetail's .config-summary { flex-direction: column }. Shared
+# picked up the old SwarmDetail's .config-summary { flex-direction: column }. Shared
 # primitives (.empty-state, .provider-badge) live once in client/src/App.css;
 # everything else is prefixed with its component.
 DUPES="$(

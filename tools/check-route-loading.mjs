@@ -21,18 +21,16 @@ try {
   await session.waitForNetworkIdle(3_500, 20_000, /sigil.worker/);
   const paths = session.requestedPaths();
   const histories = paths.filter((p) => /^\/api\/conversations\/[^/]+\/messages$/.test(p));
-  const unusedRoutes = paths.filter((p) => /\/swarm\/Swarm(?:Dashboard|Detail|Analytics)/.test(p));
   const directory = await session.evaluate(
     mobile
       ? 'document.querySelector(".mobile-buddies__grid") !== null'
       : 'document.querySelector(".buddies-directory-content") !== null'
   );
-  console.log({ historyRequests: histories.length, unusedRoutes: unusedRoutes.length, directory });
+  console.log({ historyRequests: histories.length, directory });
   assert.deepEqual(histories, [], 'opening Buddies must not download unopened chat histories');
   assert.ok(directory, 'the Buddies directory must finish loading');
-  assert.deepEqual(unusedRoutes, [], 'opening Buddies must not preload swarm pages');
   console.log(
-    `route-loading PASS (${mobile ? 'mobile' : 'desktop'}; ${paths.length} paths; no unopened histories or swarm pages)`
+    `route-loading PASS (${mobile ? 'mobile' : 'desktop'}; ${paths.length} paths; no unopened histories)`
   );
 } finally {
   await session.close();
