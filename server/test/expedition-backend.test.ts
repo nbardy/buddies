@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import type { ExpeditionView } from '@unleashd/shared';
+import { type ExpeditionView, WS_PATH, decodeRows } from '@unleashd/shared';
+import { WebSocket } from 'ws';
 import { NO_AUTO_INSTALL } from './fixtures/backend-env';
 import { freePortSync } from './free-port';
 
@@ -52,13 +53,14 @@ async function main(){
   const accepted=await invoke();fs.writeFileSync(path.join(fake,'accepted'),JSON.stringify(accepted));
   fs.writeFileSync(path.join(fake,'rewritten'),'');await client.close();done('Manager rewrote plan');return;
  }
+ if(/needs your decision:.*wait cancelled/.test(prompt))fs.writeFileSync(path.join(fake,'cancel-wake'),prompt);
  if(!tag){done('ok');return;}
  if(process.argv.includes('--dangerously-skip-permissions')||process.argv.includes('--dangerously-bypass-approvals-and-sandbox'))throw Error('Expedition omitted capabilities');
  fs.writeFileSync(path.join(fake,tag+'.argv'),JSON.stringify(process.argv.slice(2)));
  if(codex ? !process.argv.includes('-s') : !process.argv.includes('dontAsk'))throw Error('Missing restrictive capability argv');
  fs.appendFileSync(path.join(fake,'spawns'),tag+' '+process.pid+'\n');
  fs.writeFileSync(path.join(fake,tag+'.started'),String(process.pid));
- if(tag==='slow'||tag==='drop'||tag==='resource')await new Promise(resolve=>{const t=setInterval(()=>{if(fs.existsSync(path.join(fake,tag+'.go'))){clearInterval(t);resolve()}},10)});
+ if(tag==='slow'||tag==='drop'||tag==='resource'||tag==='ownerstop')await new Promise(resolve=>{const t=setInterval(()=>{if(fs.existsSync(path.join(fake,tag+'.go'))){clearInterval(t);resolve()}},10)});
  if(tag==='edit'){
   fs.writeFileSync('value.txt','after\n');cp.execFileSync('git',['add','value.txt']);cp.execFileSync('git',['-c','commit.gpgsign=false','commit','-qm','edit']);
  }
@@ -304,4 +306,44 @@ test('real backend: fan-out, restart adoption, checkout judges, question, rewrit
   );
   await eventually(async () => (await view(stopped.id)).status === 'stopped', 'manager stop');
   assert.deepEqual((await view(stopped.id)).questions, [], 'stopped questions cannot be answered');
+});
+
+test('owner Stop cancels a step and wakes its manager', { timeout: 120000 }, async () => {
+  const run = await launch(
+    plan("wait:{by:'claude:claude-haiku-5-5:low',brief:'TAG:ownerstop'}", 'return await s.wait();')
+  );
+  await eventually(() => count('ownerstop') === 1, 'step running');
+  const socket = new WebSocket(`ws://127.0.0.1:${port}${WS_PATH}`, {
+    headers: { authorization: `Bearer ${auth}` },
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      socket.on('error', reject);
+      socket.on('message', (b) => {
+        const m = JSON.parse(b.toString());
+        if (m.type !== 'hello') return;
+        const row = decodeRows(m).find((row) => row.label === 'Expedition wait');
+        assert.ok(row, 'step conversation is visible to the app');
+        socket.send(JSON.stringify({ type: 'stop_conversation', conversationId: row.id }));
+        resolve();
+      });
+    });
+    await eventually(async () => {
+      const v = await view(run.id);
+      return (
+        v.status === 'held' &&
+        v.steps[0]?.state === 'cancelled' &&
+        fs.existsSync(path.join(fake, 'cancel-wake'))
+      );
+    }, 'cancelled receipt held the plan and reached the manager');
+    assert.match(
+      fs.readFileSync(path.join(fake, 'cancel-wake'), 'utf8'),
+      /Required step wait cancelled/
+    );
+    assert.equal(count('ownerstop'), 1);
+    const pid = Number(fs.readFileSync(path.join(fake, 'ownerstop.started'), 'utf8'));
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+  } finally {
+    socket.close();
+  }
 });

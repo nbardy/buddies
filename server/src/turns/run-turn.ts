@@ -77,7 +77,8 @@ class RunTurnPolicy extends ChatTurnPolicy {
   override settle(outcome: ExecutionOutcome): Promise<void> {
     return Promise.resolve(this.save(outcome));
   }
-  override stop = () => false;
+  // Owner Stop must use the same stopOwnedTurn path as cancelTurn(key).
+  // Guard: expedition-backend "owner Stop cancels a step and wakes its manager".
 }
 // Pattern: idempotency-keys (docs/patterns.md#idempotency-keys)
 export function createRunTurn(ports: {

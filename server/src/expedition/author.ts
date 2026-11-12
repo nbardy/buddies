@@ -235,7 +235,7 @@ export function expedition<const S extends Record<string, Definition>>(config: {
             async (a?: unknown, b?: Options) => {
               const r = await attempt(a, b);
               if (r.t !== 'passed') {
-                throw new Error(`Required step ${name} did not pass; rewrite its inputs to retry.`);
+                throw new Error(`Required step ${name} ${r.t}; rewrite its inputs to retry.`);
               }
               return r;
             },
