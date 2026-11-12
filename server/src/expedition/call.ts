@@ -305,6 +305,8 @@ export async function execute(
         };
       }
     }
+    c satisfies never;
+    throw new Error('Unreachable expedition call');
   } finally {
     at.signal.removeEventListener('abort', cancel);
     if (c.t === 'agent' && c.checkout) {

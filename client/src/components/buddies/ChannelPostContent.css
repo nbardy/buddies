@@ -74,7 +74,7 @@
 /* The initial avatar (BuddySigil.tsx Initial; here because a .css import in a .tsx breaks the node test runner): a letter tinted from one theme accent (--tone). */
 .avatar-initial {
   background: color-mix(in oklab, var(--tone, var(--accent-primary)) 26%, var(--theme-bg-canvas));
-  fill: color-mix(in oklab, var(--tone) 72%, white);
+  fill: color-mix(in oklab, var(--tone, var(--accent-primary)) 72%, white);
   font-family: inherit;
   font-weight: 700;
 }
