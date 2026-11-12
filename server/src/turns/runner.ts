@@ -1098,7 +1098,7 @@ const SETTLED: {
 
 /** One turn's event stream folded into its runner: one handler per event type. */
 class EventFold {
-  readonly requests: Omit<ProviderTurnUsage, 'observedAt'>[] = [];
+  readonly requests: Extract<UnifiedAgentEvent, { type: 'usage' }>['usage'][] = [];
   finalText: string | undefined;
   streamError: Error | null = null;
   // A failing turn.complete fails automation although the stream closed cleanly.
@@ -1165,7 +1165,7 @@ class EventFold {
         runner.logProgress(event);
         return;
       case 'usage':
-        runner.noteUsage(event.usage);
+        if (event.usage.t === 'request') runner.noteUsage(event.usage);
         return;
       case 'subagent.state':
         runner.sawOutput();

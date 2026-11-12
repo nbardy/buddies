@@ -41,19 +41,20 @@ type Call = { request: RunTurnRequest; conversationId: string } & (
 );
 export class TurnKeyConflictError extends Error {}
 // Pattern: parse-dont-validate (docs/patterns.md#parse-dont-validate)
-// The event stream has no cache-write tiers or Codex usage. Never price missing classes as zero.
-// Guard: run-turn "usage classes"; the session context meter remains last-write-wins.
+// Aggregate billing replaces request measurements; it must never become the live context size.
+// Guard: run-turn usage classes and agent-cli's parser mapping table.
 export function turnUsage(requests: readonly TurnUsage[]): Usage {
-  if (
-    !requests.length ||
-    requests.some((u) => u.cachedInputTokens === undefined || u.cacheWriteTokens !== 0)
-  )
-    return { t: 'unreported', why: 'Token classes or cache-write tier not reported', requests };
+  const total = [...requests].reverse().find((u) => u.t === 'total');
+  const counted = total ? [total] : requests;
+  if (!counted.length) return { t: 'unreported', why: 'Harness reported no usage', requests };
   const tokens: Tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1H: 0 };
-  for (const u of requests) {
-    tokens.input += u.contextTokens - (u.cachedInputTokens as number);
-    tokens.output += u.outputTokens;
-    tokens.cacheRead += u.cachedInputTokens as number;
+  for (const u of counted) {
+    if (u.tokens.t === 'unreported') return { ...u.tokens, requests };
+    tokens.input += u.tokens.input;
+    tokens.output += u.tokens.output;
+    tokens.cacheRead += u.tokens.cacheRead;
+    tokens.cacheWrite += u.tokens.cacheWrite5m + u.tokens.cacheWrite1h;
+    tokens.cacheWrite1H += u.tokens.cacheWrite1h;
   }
   return { t: 'reported', tokens };
 }

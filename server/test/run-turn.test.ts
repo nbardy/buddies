@@ -58,7 +58,7 @@ async function main() {
     if (fs.existsSync(path.join(dir, key + '.go'))) { clearInterval(timer); resolve(); }
   }, 10); });
   out('final answer');
-  say(codex ? {type:'turn.completed',usage:{input_tokens:999,output_tokens:999}} : {type:'result',subtype:'success',result:'final answer',usage:{input_tokens:999,output_tokens:999}});
+  say(codex ? {type:'turn.completed',usage:{input_tokens:999,output_tokens:999}} : {type:'result',subtype:'success',result:'final answer',usage:{input_tokens:30,output_tokens:6,cache_read_input_tokens:10,cache_creation_input_tokens:0}});
 }
 `;
 let backend: ChildProcess | undefined;
@@ -364,8 +364,8 @@ test('Codex capabilities reach argv and unavailable usage stays explicitly unrep
 test('usage classes: absent cache class and unknown cache-write tier are never priced as zero', () => {
   for (const requests of [
     [],
-    [{ contextTokens: 10, outputTokens: 2 }],
-    [{ contextTokens: 20, outputTokens: 2, cachedInputTokens: 5, cacheWriteTokens: 10 }],
+    [{ t: 'total' as const, tokens: { t: 'unreported' as const, why: 'missing cached read' } }],
+    [{ t: 'total' as const, tokens: { t: 'unreported' as const, why: 'missing cache tiers' } }],
   ]) {
     const usage = turnUsage(requests);
     assert.equal(usage.t, 'unreported');
