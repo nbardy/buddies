@@ -12,6 +12,8 @@ import type { OwnerUnread } from '@unleashd/buddies-core';
  */
 import {
   type BuddyMemberExecution,
+  EXPEDITION_PROPOSAL,
+  ExpeditionProposal,
   type InstalledAgent,
   type MessageBody,
   ProviderSchema,
@@ -19,7 +21,6 @@ import {
   type ThreadSeatsResult,
   buddyExecutionPreferences,
   configFromProviderPreferences,
-  keyed,
   legacyBody,
 } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
@@ -525,20 +526,20 @@ export function postPurposeTag(post: Post): string | undefined {
   return post.purpose;
 }
 
-export type ExpeditionCard = { t: 'none' } | { t: 'proposal'; proposal: keyed.KeyedProposal };
+export type ExpeditionCard = { t: 'none' } | { t: 'proposal'; proposal: ExpeditionProposal };
 
 export function expeditionCardOf(post: Post): ExpeditionCard {
   // κ: purpose is free text on the wire; only `expedition` with its evidence is a card.
   if (post.purpose !== 'expedition') return { t: 'none' };
-  const proposed = post.evidence.find((e) => e.startsWith(keyed.PROPOSAL_EVIDENCE));
-  if (proposed !== undefined) return proposalOf(proposed.slice(keyed.PROPOSAL_EVIDENCE.length));
+  const proposed = post.evidence.find((e) => e.startsWith(EXPEDITION_PROPOSAL));
+  if (proposed !== undefined) return proposalOf(proposed.slice(EXPEDITION_PROPOSAL.length));
 
   return { t: 'none' };
 }
 /** A proposal that does not parse is shown as its plain body (the fallback text), not guessed at. */
 function proposalOf(json: string): ExpeditionCard {
   try {
-    const proposal = keyed.KeyedProposal.safeParse(JSON.parse(json));
+    const proposal = ExpeditionProposal.safeParse(JSON.parse(json));
     return proposal.success ? { t: 'proposal', proposal: proposal.data } : { t: 'none' };
   } catch {
     return { t: 'none' };
@@ -1149,7 +1150,7 @@ export function useOwnerUnreadTitle(): void {
   useEffect(() => {
     const prefix = total.requests > 0 ? `(${total.requests}) ` : anyUnread(total) ? '• ' : '';
     document.title = `${prefix}${baseTitle.current}`;
-  }, [total.requests, total.unreadChannels, total.unreadThreads]);
+  }, [total.requests, total.unreadChannels, total.unreadThreads, total]);
 }
 
 /** Archive changes navigation and unread counts on both shells through the shared keyed cache. */

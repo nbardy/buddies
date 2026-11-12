@@ -256,21 +256,21 @@ async function discoverSwarm(api) {
 }
 
 /**
- * Keyed expeditions (docs/expeditions/keyed/v1/CONNECT_PLAN.md §4) to shoot: the live one that
+ * Expeditions to shoot: the live one that
  * shows the most (waiting on the owner first, then running), and a finished one. Each opens in the
  * workspace it was launched in. A backend without the route (404: older code) has none.
  */
-async function discoverKeyed(api) {
-  const rows = await api('/api/buddies/keyed-expeditions').catch((error) => {
+async function discoverExpeditions(api) {
+  const rows = await api('/api/buddies/expeditions').catch((error) => {
     if (/HTTP 404/.test(error.message)) return [];
     throw error;
   });
-  const placed = rows.filter((row) => row.workspace?.t === 'workspace');
-  const pick = (row) => (row ? { id: row.id, workspaceId: row.workspace.id } : null);
-  const live = placed.filter((row) => row.status.t !== 'finished');
+  const placed = rows;
+  const pick = (row) => (row ? { id: row.id, workspaceId: row.workspaceId } : null);
+  const live = placed.filter((row) => !['met', 'stopped'].includes(row.status));
   return {
-    keyedLive: pick(live.find((row) => row.needsYou) ?? live[0]),
-    keyedFinished: pick(placed.find((row) => row.status.t === 'finished')),
+    expeditionLive: pick(live.find((row) => row.questions.length) ?? live[0]),
+    expeditionFinished: pick(placed.find((row) => ['met', 'stopped'].includes(row.status))),
   };
 }
 
@@ -312,7 +312,7 @@ async function discover(api, args, token) {
     ...buddy,
     directConversationId: direct?.generations?.at(-1) ?? null,
     swarmProject: await discoverSwarm(api),
-    ...(await discoverKeyed(api)),
+    ...(await discoverExpeditions(api)),
   };
 }
 
@@ -500,16 +500,6 @@ const hoverTaskIn = (text) =>
   chip.focus();
   return 'OK';`);
 
-// Select the last bar that did not pass (else the last bar): its detail panel shows its outcome,
-// why and cost under the plot.
-const SELECT_KEYED_BAR = prep(`
-  const bars = [...document.querySelectorAll('.keyed-expedition-bar')];
-  if (bars.length === 0) return 'SKIP';
-  const bar = bars.findLast((b) => b.dataset.tone !== 'passed') ?? bars.at(-1);
-  bar.click();
-  await tick(300);
-  return has('.keyed-expedition-bar[aria-pressed="true"]');`);
-
 /**
  * The Buddy tab list lives once, in the client (buddy-tabs.ts). It is read
  * from source rather than copied here so a new tab gets a screen for free.
@@ -549,9 +539,9 @@ export function buildScreens(found, focus) {
   const noThread = noChannel ?? (thread ? null : 'no thread with replies in this channel');
   const noFocus = noThread ?? (focus ? null : 'needs --focus <text in a thread post>');
   const swarm = found.swarmProject && `/workers/detail?project=${enc(found.swarmProject)}`;
-  /** One keyed expedition's Timeline, in the Channels pane of its own workspace. */
-  const keyedPath = (k) =>
-    k && `/buddies/workspaces/${enc(k.workspaceId)}/channels?keyed=${enc(k.id)}`;
+  /** One expedition, in the Channels pane of its own workspace. */
+  const expeditionPath = (k) =>
+    k && `/buddies/workspaces/${enc(k.workspaceId)}/channels?expedition=${enc(k.id)}`;
 
   return [
     // ── Conversations ──
@@ -752,19 +742,17 @@ export function buildScreens(found, focus) {
       ),
     },
     { name: 'landing', missing: null, views: onBoth(`${channels}?view=home`) },
-    // Keyed expeditions (KeyedExpeditionView.tsx): the Timeline with its asks, approval and
-    // detail panel; a bar is selected so the detail panel (cost, outcome) is in the shot.
     {
-      name: 'keyed-expedition',
-      missing: found.keyedLive ? null : 'no unfinished keyed expedition with a workspace',
+      name: 'expedition',
+      missing: found.expeditionLive ? null : 'no unfinished expedition with a workspace',
       settleMs: 1000,
-      views: onBoth(keyedPath(found.keyedLive), SELECT_KEYED_BAR),
+      views: onBoth(expeditionPath(found.expeditionLive)),
     },
     {
-      name: 'keyed-expedition-finished',
-      missing: found.keyedFinished ? null : 'no finished keyed expedition with a workspace',
+      name: 'expedition-finished',
+      missing: found.expeditionFinished ? null : 'no finished expedition with a workspace',
       settleMs: 1000,
-      views: onBoth(keyedPath(found.keyedFinished), SELECT_KEYED_BAR),
+      views: onBoth(expeditionPath(found.expeditionFinished)),
     },
     {
       name: 'landing-mentions',

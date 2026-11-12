@@ -63,8 +63,6 @@ export function fakeBuddyPort(
       execution: { kind: 'run', provider: 'codex', model: undefined, reasoningEffort: undefined },
       ...(options.briefing?.(context) ?? { briefing: 'FIXTURE_BRIEFING', memoryGeneration: '1' }),
     }),
-    // An ordinary Buddy turn (expedition calls are covered through the real backend).
-    turnSeat: () => ({ t: 'buddy' }),
 
     queueChat:
       options.queueChat ??

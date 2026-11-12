@@ -520,8 +520,7 @@ export * from './buddy-api.js';
 export * from './buddy-channel-posts.js';
 export * from './buddy-workspace-activity.js';
 export * from './dependencies.js';
-// The keyed expedition wire model remains namespaced for its consumers.
-export * as keyed from './expedition-keyed.js';
+export * from './expedition.js';
 // Oompa raw JSON file types (auto-generated from oompa_loompas schemas)
 export type {
   OompaCycle,
@@ -532,5 +531,3 @@ export type {
 export * from './harness-retry.js';
 export * from './mobile-access.js';
 export * from './upstream.js';
-
-export * from './expedition.js';

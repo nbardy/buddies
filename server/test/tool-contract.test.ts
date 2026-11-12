@@ -197,7 +197,7 @@ test(`the worker role's tool descriptions total at most ${WORKER_DESCRIPTION_BUD
 
 // Cut-over guard: all four old records were stopped and retired on 2026-11-11.
 // Only keyed proposals and reads remain; never reintroduce a second host's actions.
-test('expedition advertises only keyed propose, status and list', () => {
+test('expedition exposes manager actions but never launch', () => {
   const tool = toolsFor('worker').expedition;
   const schema = advertised(tool.schema);
   const properties = schema.properties as Obj;
@@ -206,6 +206,6 @@ test('expedition advertises only keyed propose, status and list', () => {
     asList(action.anyOf)
       .map((v) => ((v as Obj).properties as Obj).do)
       .map((v) => (v as Obj).const),
-    ['propose', 'status', 'list']
+    ['propose', 'list', 'status', 'continue', 'stop', 'rewrite']
   );
 });

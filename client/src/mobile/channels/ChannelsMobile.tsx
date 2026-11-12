@@ -48,9 +48,9 @@ import {
   channelsView,
 } from '../../components/buddies/channels-view';
 import { RailExpeditions, type RailRowClasses } from '../../components/buddies/ExpeditionRail';
+import { ExpeditionView } from '../../components/buddies/ExpeditionView';
 import { GroupDmNotice } from '../../components/buddies/GroupDmNotice';
 import { HighlightRow } from '../../components/buddies/HighlightRow';
-import { KeyedExpeditionView } from '../../components/buddies/KeyedExpeditionView';
 import { TaskFilter } from '../../components/buddies/TaskFilter';
 import { TaskPage } from '../../components/buddies/TaskPage';
 import type { Buddy, Channel, ChannelUnread, Inbox } from '../../components/buddies/types';
@@ -122,9 +122,9 @@ function renderScreen(screen: ChannelsView, context: ScreenContext) {
           workspaceId={context.workspaceId}
         />
       );
-    case 'keyed':
+    case 'expedition':
       return (
-        <KeyedExpeditionView
+        <ExpeditionView
           key={screen.id}
           id={screen.id}
           workspaceId={context.workspaceId}

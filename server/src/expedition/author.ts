@@ -1,6 +1,7 @@
 import type { ExpeditionRef, ExpeditionResult } from '@unleashd/shared';
 import { z } from 'zod';
 import { zodToJsonSchema as convert } from 'zod-to-json-schema';
+import type { ContractInput } from './gates';
 
 // Conversion is a runtime walk. Avoid instantiating Zod's graph twice (2026-11-10 OOM).
 const jsonSchema = convert as unknown as (schema: unknown) => object;
@@ -37,13 +38,9 @@ type ItemDefinition<I extends z.ZodType<{ id: string }>, O extends z.ZodTypeAny>
     ? Omit<D, 'item' | 'returns'>
     : never
   : never) & { item: I; returns?: O };
-export function step<I extends z.ZodType<{ id: string }>, O extends z.ZodTypeAny>(
-  d: ItemDefinition<I, O> & { returns: O }
-): typeof d;
-export function step<I extends z.ZodType<{ id: string }>>(
-  d: ItemDefinition<I, typeof report> & { returns?: never }
-): typeof d;
-export function step(d: unknown): unknown {
+export function step<I extends z.ZodType<{ id: string }>, O extends z.ZodTypeAny = typeof report>(
+  d: ItemDefinition<I, O>
+): typeof d {
   return d;
 }
 type Options = {
@@ -62,19 +59,6 @@ type Made<S> = {
   [K in keyof S]: ((...a: Args<S[K]>) => Promise<Held<Out<S[K]>> & { t: 'passed' }>) & {
     try: (...a: Args<S[K]>) => Promise<Result<Out<S[K]>>>;
   };
-};
-export type ContractInput = {
-  goal: string;
-  leader: string;
-  repo: string;
-  budget: { usd: number; hours: number };
-  done: ({ check: string } | { review: string; by: string } | { owner: string })[];
-  rules: string[];
-  pools?: Record<string, number>;
-  autoApply?: { usd: number };
-  call?: { usd?: number; minutes?: number };
-  leaderWake?: { usd: number; minutes: number };
-  doneReview?: { usd: number; minutes: number };
 };
 export type Call = {
   key: string;
@@ -258,7 +242,6 @@ export function expedition<const S extends Record<string, Definition>>(config: {
             async (a?: unknown, b?: Options) => {
               const r = await attempt(a, b);
               if (r.t !== 'passed') {
-                await question(`Required step ${name} ${JSON.stringify(r)}`, 'manager');
                 throw new Error(`Required step ${name} did not pass; rewrite its inputs to retry.`);
               }
               return r;

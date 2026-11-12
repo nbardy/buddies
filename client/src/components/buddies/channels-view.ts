@@ -12,7 +12,7 @@
  *   D = Home (channel list + Buddies) ⊕ Landing (the workspace Home) ⊕ Threads ⊕ Channel ⊕ Thread ⊕ Task ⊕ DM ⊕ Workers
  *       ⊕ Keyed expedition
  *
- * `keyed` (`?keyed=`) opens the Timeline of KeyedExpeditionView.tsx.
+ * `keyed` (`?expedition=`) opens the Timeline of ExpeditionView.tsx.
  *
  * `dm` is a Buddy DM conversation drawn as a thread (493c1c7). It wins over the other params,
  * which stay in the URL so Back (dropping `dm`) returns to the screen the DM was opened from.
@@ -26,7 +26,7 @@ export type ChannelsView =
   | { kind: 'task'; channelId: string; taskId: string }
   | { kind: 'dm'; conversationId: string }
   | { kind: 'workers'; buddyId: string }
-  | { kind: 'keyed'; id: string };
+  | { kind: 'expedition'; id: string };
 
 export function channelsView(search: string): ChannelsView {
   const params = new URLSearchParams(search);
@@ -35,8 +35,8 @@ export function channelsView(search: string): ChannelsView {
   const taskId = params.get('task');
   const workers = params.get('workers');
   if (workers) return { kind: 'workers', buddyId: workers };
-  const keyed = params.get('keyed');
-  if (keyed) return { kind: 'keyed', id: keyed };
+  const keyed = params.get('expedition');
+  if (keyed) return { kind: 'expedition', id: keyed };
   const dm = params.get('dm');
   if (dm) return { kind: 'dm', conversationId: dm };
   if (params.get('view') === 'home') return { kind: 'landing' };
@@ -71,7 +71,7 @@ export function channelsHref(workspaceId: string, screen: ChannelsView): string 
       return `${base}?workers=${encodeURIComponent(screen.buddyId)}`;
     case 'dm':
       return `${base}?dm=${encodeURIComponent(screen.conversationId)}`;
-    case 'keyed':
-      return `${base}?keyed=${encodeURIComponent(screen.id)}`;
+    case 'expedition':
+      return `${base}?expedition=${encodeURIComponent(screen.id)}`;
   }
 }

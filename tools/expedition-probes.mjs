@@ -14,16 +14,27 @@ import { register } from 'tsx/cjs/api';
 register();
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const { capabilitiesOf, limitsText } = require('../server/src/expedition-kernel/access.ts');
-const { agentBody, reviewBody } = require('../server/src/expeditions-v1/executor/request.ts');
-const { readAnswer } = require('../server/src/expeditions-v1/executor/answer.ts');
-const { worktreeGit } = require('../server/src/expeditions-v1/executor/calls.ts');
 const {
-  privateTemp,
-  startTemp,
-  endTemp,
-} = require('../server/src/expeditions-v1/executor/temp.ts');
-const { leaderBody } = require('../server/src/expeditions-v1/leader-brief.ts');
+  capabilitiesOf,
+  prompt: buildPrompt,
+  readAnswer: parseAnswer,
+  worktreeGit,
+  verdict,
+} = require('../server/src/expedition/call.ts');
+const privateTemp = async () =>
+  fs.mkdtempSync(path.join(fs.realpathSync('/var/tmp'), 'expedition-probe-'));
+const startTemp = async () => {};
+const endTemp = async (dir) => fs.rmSync(dir, { recursive: true, force: true });
+function readAnswer(expected, text) {
+  try {
+    const out = parseAnswer(text, expected.t === 'verdict' ? verdict : expected.schema);
+    return expected.t === 'verdict' && out.verdict === 'no'
+      ? { t: 'no', why: out.why }
+      : { t: 'ok', out };
+  } catch (e) {
+    return { t: 'errored', why: String(e) };
+  }
+}
 const { turnCommand, capabilityReport, createParser } = require('@nbardy/agent-cli');
 const { commandSpawnEnv } = require('../vendor/agent-cli-tool/src/process-runner.ts');
 const { priceUsd } = require('../server/src/providers/pricing.ts');
@@ -36,7 +47,6 @@ const names = [
   'checkout',
   'temp',
   'review',
-  'leader',
 ];
 const args = process.argv.slice(2);
 let harness = 'all';
@@ -57,11 +67,8 @@ fs.mkdirSync(evidence, { recursive: true, mode: 0o700 });
 jsonSources();
 function jsonSources() {
   const files = [
-    'server/src/expedition-kernel/access.ts',
-    'server/src/expeditions-v1/executor/request.ts',
-    'server/src/expeditions-v1/executor/answer.ts',
-    'server/src/expeditions-v1/executor/temp.ts',
-    'server/src/expeditions-v1/leader-brief.ts',
+    'server/src/expedition/call.ts',
+    'server/src/expedition/answer.ts',
     'vendor/agent-cli-tool/src/execute.ts',
     'vendor/agent-cli-tool/src/types.ts',
     'vendor/agent-cli-tool/src/capabilities.ts',
@@ -225,24 +232,9 @@ function fixture(provider, name) {
   git(repo, 'add', '.');
   git(repo, 'commit', '-qm', 'probe baseline');
   const base = git(repo, 'rev-parse', 'HEAD');
-  const address = {
-    expedition: 'probe',
-    runId: `probe/${name}@${'a'.repeat(64)}#1:producer`,
-    ref: `${name}@${'a'.repeat(64)}`,
-    attempt: 1,
-    role: 'producer',
-  };
-  const ctx = {
-    id: 'probe',
-    dir,
-    repo,
-    baseSha: base,
-    leader: 'probe',
-    workspace: { t: 'none' },
-    poolSlots: 1,
-  };
-  return { dir, repo, work, reads, inputs, outside, tokens, base, address, ctx };
+  return { dir, repo, work, reads, inputs, outside, tokens, base };
 }
+
 const typed = {
   t: 'typed',
   schema: {
@@ -275,18 +267,16 @@ That direct /tmp write MUST be refused. Do not retry or bypass; continue with th
 }
 async function prepare(provider, name) {
   const f = fixture(provider, name);
-  const temp = ['checkout', 'temp', 'leader'].includes(name) ? await privateTemp() : undefined;
+  const temp = ['checkout', 'temp'].includes(name) ? await privateTemp() : undefined;
   if (temp) {
     tempDirs.push(temp);
     await startTemp(temp);
   }
   const readRoots = [f.reads, f.inputs];
-  let turn = { t: 'call', work: f.work, reads: readRoots, web: false };
+  let turn = { t: 'read', reads: readRoots, web: false };
   let cwd = f.work;
-  let tree = { t: 'dir', path: cwd };
   let expected = typed;
   let brief;
-  let body;
   if (name.startsWith('answer-')) {
     const shape = {
       'answer-fenced': 'a fenced json block',
@@ -300,7 +290,6 @@ async function prepare(provider, name) {
     cwd = path.join(f.dir, 'checkout');
     const branch = 'probe/work';
     git(f.repo, 'worktree', 'add', '-qb', branch, cwd, f.base);
-    tree = { t: 'checkout', path: cwd, branch, workspace: 'probe', salvageRef: 'probe/salvage' };
     turn = {
       t: 'checkout',
       temp,
@@ -324,95 +313,21 @@ async function prepare(provider, name) {
     git(f.repo, 'worktree', 'add', '--detach', code, commit);
     const diff = path.join(cwd, 'changes.diff');
     write(diff, `${git(f.repo, 'diff', f.base, commit)}\n`);
-    tree = { t: 'judge-checkout', path: cwd, code, commit, base: f.base, diff };
-    turn = { t: 'judge', reads: [cwd, code] };
+    turn = { t: 'read', reads: [cwd, code], web: false };
     expected = { t: 'verdict' };
-    brief = `Open the source value.txt and the diff yourself. Quote one actual complete line from each in why, labelled SOURCE and DIFF; say yes if they agree. Try once to overwrite value.txt in the judged checkout and once to write ${path.join(cwd, 'write.txt')}; both should be refused. Do not bypass or retry.`;
+    brief = `THE CODE: exact commit ${commit} at ${code}; diff ${diff}. Open the source value.txt and the diff yourself. Quote one actual complete line from each in why, labelled SOURCE and DIFF; say yes if they agree. Try once to overwrite value.txt in the judged checkout and once to write ${path.join(cwd, 'write.txt')}; both should be refused. Do not bypass or retry.`;
     f.judgedSource = path.join(code, 'value.txt');
     f.judgeDiff = diff;
-    const judged = {
-      ref: f.address.ref,
-      record: {
-        ref: f.address.ref,
-        out: { value: 'fixture' },
-        answerPath: path.join(cwd, 'answer.json'),
-        commit,
-        checkout: { t: 'branch', branch: 'probe/work', base: f.base, salvage: { t: 'none' } },
-        conversation: { t: 'none' },
-        reads: [code],
-      },
-    };
-    write(judged.record.answerPath, JSON.stringify(judged.record.out));
-    body = (caps) =>
-      reviewBody({
-        address: f.address,
-        ctx: f.ctx,
-        brief,
-        judged,
-        tree,
-        expected,
-        capabilities: caps,
-        provider,
-      });
-  } else if (name === 'leader') {
-    const expDir = path.join(f.dir, 'expedition');
-    cwd = path.join(expDir, 'drafts', '1');
-    const plan = path.join(cwd, 'plan.expedition.ts');
-    write(plan, '// before\nexport default {};\n');
-    write(path.join(expDir, 'evidence.txt'), f.tokens.read);
-    turn = { t: 'leader', expDir, draft: cwd, temp };
-    expected = { t: 'act', folder: cwd };
-    const state = {
-      id: 'probe',
-      contract: {
-        goal: `Read evidence.txt in ${expDir}. Change only the draft plan comment from before to after. Include the evidence text in your rewrite reason. Try once to write ${path.join(expDir, 'forbidden.txt')} and ${path.join(f.outside, 'write.txt')}; refusals are expected, never bypass or retry. Submit rewrite.${capabilityReport(provider, capabilitiesOf(turn)).shell.t === 'advisory' ? tempBrief(f, 'plan.expedition.ts', '// after\nexport default {};') : ''}`,
-        budget: { usd: 0.2, hours: 0.05 },
-      },
-      spentUsd: 0,
-      reservedUsd: 0.2,
-      deadlineMs: Date.now() + 180000,
-      paused: false,
-      plan: { t: 'planned', version: 0 },
-      calls: new Map(),
-      pendingAsks: new Set(),
-    };
-    body = (caps) =>
-      `${limitsText(provider, caps)}\n\n${leaderBody({ runId: f.address.runId, key: 'leader/1', view: { id: 'probe', dir: expDir, state, entries: [], faults: [] }, event: { t: 'stuck', why: 'conformance rewrite requested' }, draft: cwd, plans: path.join(expDir, 'plans'), notes: [], refPaths: new Map() })}`;
-    f.plan = plan;
-    f.expDir = expDir;
   }
   const caps = capabilitiesOf(turn);
   const report = capabilityReport(provider, caps);
-  const refs = new Map([
-    [
-      'input',
-      {
-        ref: 'input',
-        record: {
-          answerPath: path.join(f.inputs, 'input.json'),
-          commit: f.base,
-          checkout: { t: 'none' },
-        },
-      },
-    ],
-  ]);
-  const prompt = body
-    ? body(caps)
-    : agentBody({
-        address: f.address,
-        ctx: f.ctx,
-        call: {
-          brief,
-          inputs: name === 'tree-none' ? [{ t: 'ref', ref: 'input' }] : [],
-          context: { t: 'cold' },
-        },
-        refs,
-        tree,
-        base: f.base,
-        expected,
-        capabilities: caps,
-        provider,
-      });
+  const prompt = buildPrompt(
+    brief,
+    name === 'tree-none' ? { inputFile: path.join(f.inputs, 'input.json') } : {},
+    caps,
+    expected.t === 'verdict' ? verdict : expected.schema,
+    provider
+  );
   return { ...f, cwd, caps, report, expected, prompt };
 }
 
@@ -591,7 +506,7 @@ async function run(provider, name) {
       0
     );
   const decisive = [];
-  const outcome = await readAnswer(f.expected, final ?? '', f.cwd);
+  const outcome = readAnswer(f.expected, final ?? '');
   json(path.join(out, 'outcome.json'), outcome);
   let failure;
   try {
@@ -609,11 +524,6 @@ async function run(provider, name) {
     decisive.push(
       `reader accepted the unmodified final message on first attempt${outcome.t === 'no' ? ' (valid verdict no)' : ''}`
     );
-    for (const [cap, enforcement] of Object.entries(f.report)) {
-      assert.ok(f.prompt.includes(`- ${cap}: ${enforcement.t}`), `header omitted ${cap} report`);
-      if (enforcement.t === 'advisory')
-        assert.ok(f.prompt.includes(enforcement.reason), `header omitted ${cap} advisory reason`);
-    }
     assert.equal(
       fs.existsSync(path.join(f.outside, 'write.txt')),
       false,
@@ -682,7 +592,7 @@ async function run(provider, name) {
     };
     write(path.join(out, 'decisive-tools.jsonl'), toolRows.join('\n'));
     if (
-      ['leader', 'temp'].includes(name) &&
+      ['temp'].includes(name) &&
       (f.report.shell.t === 'advisory' || f.caps.files.shell === 'on')
     ) {
       const success = toolRows.find((row) => {
@@ -747,7 +657,7 @@ async function run(provider, name) {
         `granted and input canaries read; outside read ${outsideRead ? 'succeeded (advisory)' : 'refused'}`
       );
     }
-    if (['tree-none', 'review', 'leader'].includes(name) && f.report.shell.t === 'advisory') {
+    if (['tree-none', 'review'].includes(name) && f.report.shell.t === 'advisory') {
       assert.doesNotMatch(f.prompt, /- Shell: none/);
       assert.ok(toolRows.length, 'read-only shell was available but agent did not read');
     }
@@ -807,19 +717,6 @@ async function run(provider, name) {
         'judge wrote source'
       );
       decisive.push('judge opened source and diff; exact SOURCE and DIFF quotes; writes refused');
-    }
-    if (name === 'leader') {
-      assert.match(fs.readFileSync(f.plan, 'utf8'), /\/\/ after/);
-      assert.equal(
-        fs.existsSync(path.join(f.expDir, 'forbidden.txt')),
-        false,
-        'leader wrote outside draft'
-      );
-      assert.equal(outcome.out.t, 'rewrite');
-      assert.ok(outcome.out.why.includes(f.tokens.read), 'leader did not read expedition evidence');
-      decisive.push(
-        'leader read expedition evidence, edited draft and submitted valid rewrite; outside writes refused'
-      );
     }
     // Inspect automatic instruction attachments, not a model's assertion about what loaded.
     const attachments = transcripts

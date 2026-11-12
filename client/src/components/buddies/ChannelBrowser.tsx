@@ -55,9 +55,9 @@ import { channelLinkPath } from './channel-link';
 import { plainChannelText } from './channel-text';
 import { type ChannelsView, channelsHref, channelsView } from './channels-view';
 import { DESKTOP_ROW, RailExpeditions } from './ExpeditionRail';
+import { ExpeditionView } from './ExpeditionView';
 import { GroupDmNotice } from './GroupDmNotice';
 import { HighlightRow } from './HighlightRow';
-import { KeyedExpeditionView } from './KeyedExpeditionView';
 import { TaskFilter } from './TaskFilter';
 import { TaskPage } from './TaskPage';
 import { ThreadResize, useThreadPaneStyle } from './ThreadResize';
@@ -885,8 +885,8 @@ export function ChannelBrowser({
               onConversation={openDm}
             />
           ),
-          keyed: (id) => (
-            <KeyedExpeditionView key={id} id={id} workspaceId={workspaceId} frame="desktop" />
+          expedition: (id) => (
+            <ExpeditionView key={id} id={id} workspaceId={workspaceId} frame="desktop" />
           ),
           threads: () => (
             <ThreadsPane
@@ -955,7 +955,7 @@ type MainPanes = {
   home(): ReactNode;
   workers(buddyId: string): ReactNode;
   dm(conversationId: string): ReactNode;
-  keyed(id: string): ReactNode;
+  expedition(id: string): ReactNode;
   threads(): ReactNode;
   channel(): ReactNode;
   task(taskId: string, channelId: string): ReactNode;
@@ -970,8 +970,8 @@ function mainPane(view: ChannelsView, panes: MainPanes): ReactNode {
       return panes.workers(view.buddyId);
     case 'dm':
       return panes.dm(view.conversationId);
-    case 'keyed':
-      return panes.keyed(view.id);
+    case 'expedition':
+      return panes.expedition(view.id);
     case 'threads':
       return panes.threads();
     case 'task':

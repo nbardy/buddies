@@ -16,7 +16,7 @@ export function runPlan(
   const source = path.join(dir, 'plan.expedition.ts');
   fs.copyFileSync(file, source);
   const loader = require.resolve('tsx');
-  const store = fs.realpathSync(loader).split(`${path.sep}.pnpm${path.sep}`)[0] + '/.pnpm';
+  const store = `${fs.realpathSync(loader).split(`${path.sep}.pnpm${path.sep}`)[0]}/.pnpm`;
   const ancestors = (p: string): string[] =>
     path.dirname(p) === p
       ? []
@@ -64,6 +64,7 @@ export function runPlan(
   });
   child.on('message', (m: Message) => {
     if (ended) return;
+    if (m.t === 'waiting') clearTimeout(timer);
     receive(m, (result) => {
       if (child.connected) child.send({ seq: 'seq' in m ? m.seq : 0, result });
     });

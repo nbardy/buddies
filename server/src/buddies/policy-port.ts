@@ -2,7 +2,7 @@ import type { McpServerSpec } from '@nbardy/agent-cli';
 import type { BuddyContext } from '@unleashd/shared';
 import { TURN_MAX_RUNTIME_MS } from '../constants/timeouts';
 import type { ExecutionOutcome } from '../turns/execution-state';
-import type { Briefings, ResolvedBuddyConversation, TurnSeat } from './briefing';
+import type { Briefings, ResolvedBuddyConversation } from './briefing';
 import type { GrantRecord, Grants, Subscribes, TurnGrant } from './grants';
 import type { HookSet, SteeringEndpoint } from './harness-steering';
 import { MCP_SERVER_NAME } from './mcp';
@@ -17,9 +17,6 @@ import type { LeaseRenewal, Runner } from './runner';
 export interface BuddyPolicyPort {
   /** The briefing composed for this context right before its turn (synchronous; see briefing.ts). */
   currentBriefing(context: BuddyContext): ResolvedBuddyConversation;
-  /** What kind of turn that briefing is for: an expedition call (with its capability set) or any
-   * other Buddy turn. Same lookup, same error when cold. */
-  turnSeat(context: BuddyContext): TurnSeat;
   /**
    * A queued owner message becomes a `chat` run carrying `body` (its text and provenance), named
    * by the message id. The runner claims it when the Buddy has a slot and hands it to the
@@ -70,12 +67,6 @@ export interface BuddyTurnTools extends TurnTools {
   steering: SteeringEndpoint;
 }
 
-/** The grant role of a Buddy turn, by the seat its briefing was warmed for (briefing.ts). */
-const GRANT_ROLE: { readonly [S in TurnSeat['t']]: 'worker' | 'call' } = {
-  buddy: 'worker',
-  call: 'call',
-};
-
 export function createBuddyPolicyPort(deps: {
   runner: Runner;
   grants: Grants;
@@ -93,7 +84,6 @@ export function createBuddyPolicyPort(deps: {
     throw new Error(`Buddy chat deadline ${runner.chatDeadlineMs} ms < TURN_MAX_RUNTIME_MS`);
   return {
     currentBriefing: (context) => briefings.current(context),
-    turnSeat: (context) => briefings.seat(context),
     queueChat: (context, conversationId, turnId, body) =>
       runner.queueChat(context, conversationId, turnId, body),
     promoteChat: (turnId) => runner.promoteChat(turnId),
@@ -102,8 +92,7 @@ export function createBuddyPolicyPort(deps: {
       // A new turn's grant replaces whatever this conversation still held.
       grants.revokeConversation(conversationId);
       const grant = grants.issueBuddy({
-        // An expedition call's briefing (a call directory) gets the tool-less `call` role.
-        role: GRANT_ROLE[briefings.seat(context).t],
+        role: 'worker',
         buddyId: context.buddyId,
         workspaceId: context.workspaceId,
         conversationId,

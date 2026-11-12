@@ -61,7 +61,6 @@ import {
   taskDetail,
 } from './core';
 import { type BuddyEvents, announcePost } from './events';
-import { refuseExpeditionCallRun } from './expedition-calls';
 import { resolveForWorkspace, wakes } from './mentions';
 import type { Runner } from './runner';
 import { channelsNamed } from './search-channels';
@@ -79,7 +78,6 @@ export interface BuddyRouteDeps {
   runner: Runner;
   channels: Channels;
   uploadsRoot(): string;
-  hostCommands: HostCommands;
   channelChanged(channelId: string, threads: ChannelThreads): void;
   onBuddyArchived(buddyId: string): void;
   /**
@@ -172,17 +170,6 @@ function mentionConfigsByBuddy(
   return byBuddy;
 }
 
-/** Owner posts the keyed host applies itself, without waking an unbudgeted Buddy turn. */
-export interface HostCommands {
-  /** `thread` names where the post lands: a host that owns a thread (an ask) consumes the owner's
-   * replies inside it, and without the thread id an owner reply in the leader's DM starts an
-   * unbudgeted leader turn. */
-  consumes(channelId: string, body: string, thread: ReplyTarget): boolean;
-}
-/** Where an owner post lands: the channel feed, or a reply under the post `to`. */
-export type ReplyTarget = { t: 'root' } | { t: 'reply'; to: string };
-export const NO_HOST_COMMANDS: HostCommands = { consumes: () => false };
-
 export type OwnerPostInput = Omit<z.infer<typeof PostBodySchema>, 'asBuddyId' | 'mentionConfigs'>;
 
 /**
@@ -195,7 +182,7 @@ export type OwnerPostInput = Omit<z.infer<typeof PostBodySchema>, 'asBuddyId' | 
  */
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 export async function publishOwnerPost(
-  deps: Pick<BuddyRouteDeps, 'core' | 'events' | 'uploadsRoot' | 'hostCommands'>,
+  deps: Pick<BuddyRouteDeps, 'core' | 'events' | 'uploadsRoot'>,
   author: Actor,
   ref: ChannelRef,
   input: OwnerPostInput,
@@ -215,18 +202,12 @@ export async function publishOwnerPost(
     resolved.mentioned.map((buddy) => buddy.id),
     chosen
   );
-  const thread: ReplyTarget = input.replyToId ? { t: 'reply', to: input.replyToId } : { t: 'root' };
-  const consumed = author.kind === 'owner' && deps.hostCommands.consumes(target.id, body, thread);
   const { post, created } = await deps.core.post(
     author,
     { kind: 'id', id: target.id },
     // The Buddies its @mentions (or, in a DM, the owner's plain post) wake, on the owner's chip
     // picks: one `deliver` run each, written with the post (mentions.ts `wakes`).
-    // A host command wakes nobody: no mention, and purpose `host_command`, which the crate's
-    // fan-out skips (deliveries.rs WAKES_NOBODY) so a subscribed manager seat is not woken either.
-    consumed
-      ? { ...input, body, purpose: 'host_command', mentions: [] }
-      : { ...input, body, mentions: wakes(target, author, input.kind, body, picks) }
+    { ...input, body, mentions: wakes(target, author, input.kind, body, picks) }
   );
   if (!created) return { post };
   deps.events.emit({ kind: 'changed' });
@@ -436,9 +417,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       return core.listRuns(found[1](q(req, found[0])!), 100);
     },
     'GET 200 /api/buddies/runs/:runId': (req) => core.getRun(p(req, 'runId')),
-    // An expedition call's run is its expedition's to cancel (expedition-calls.ts).
     [buddyMutationRoute('run.cancel')]: async (req) => {
-      await refuseExpeditionCallRun(core, p(req, 'runId'), 'cancel');
       return runner.cancel(p(req, 'runId'));
     },
     // ---- schedules ------------------------------------------------------------------------------

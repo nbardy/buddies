@@ -14,19 +14,14 @@ import type { HookSet } from './harness-steering';
  * The crate's `authorize` decides every call; the role only picks which tools are listed.
  */
 // Pattern: capability-grants (docs/patterns.md#capability-grants)
-// `call`: an expedition call's turn (expeditions-v1). It is shown NO tools: its answer is its final
-// text, so it cannot post, spawn workers or start expeditions on the call's budget (CONNECT_PLAN
-// §0.6). Chosen only for a turn whose directory is a call directory (policy-port.ts).
-export type Role = 'worker' | 'owner' | 'reviewer' | 'builder' | 'call';
+export type Role = 'worker' | 'owner' | 'reviewer' | 'builder';
 
-/** Whether a turn under this role is followed by a memory review. A call is not (D4): the review
- * is an unbudgeted model run, and a call's spend is its expedition's to account for. */
+/** Whether a completed turn receives the normal Buddy memory review. */
 export const REVIEWS_MEMORY: { readonly [R in Role]: boolean } = {
   worker: true,
   owner: true,
   reviewer: false,
   builder: false,
-  call: false,
 };
 // What a turn's posts subscribe: itself, or its chat's branch (route-at-send, mcp.ts `subscriber`).
 export type Subscribes = 'self' | 'branch';
@@ -42,10 +37,10 @@ interface GrantBase {
   readonly observe: Observe;
 }
 
-/** A Buddy's turn: a worker, an owner-authored turn, an expedition call, or the post-turn memory
+/** A Buddy's turn: a worker, an owner-authored turn, or the post-turn memory
  * reviewer. */
 export interface BuddyGrant extends GrantBase {
-  readonly role: 'worker' | 'owner' | 'reviewer' | 'call';
+  readonly role: 'worker' | 'owner' | 'reviewer';
   readonly buddyId: string;
   readonly workspaceId: string;
   readonly runId: string | null;
@@ -80,7 +75,7 @@ export function adoptedGrant(record: GrantRecord): GrantRecord {
 export type Observe = <T>(tool: string, input: unknown, call: () => Promise<T>) => Promise<T>;
 
 export type BuddyGrantInput = {
-  role: 'worker' | 'reviewer' | 'call';
+  role: 'worker' | 'reviewer';
   buddyId: string;
   workspaceId: string;
   conversationId: string;

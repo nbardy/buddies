@@ -328,8 +328,7 @@
                   "const": "propose"
                 },
                 "file": {
-                  "type": "string",
-                  "minLength": 1
+                  "type": "string"
                 }
               },
               "required": [
@@ -343,11 +342,23 @@
               "properties": {
                 "do": {
                   "type": "string",
+                  "const": "list"
+                }
+              },
+              "required": [
+                "do"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "do": {
+                  "type": "string",
                   "const": "status"
                 },
                 "id": {
-                  "type": "string",
-                  "minLength": 1
+                  "type": "string"
                 }
               },
               "required": [
@@ -361,11 +372,64 @@
               "properties": {
                 "do": {
                   "type": "string",
-                  "const": "list"
+                  "const": "continue"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "why": {
+                  "type": "string",
+                  "minLength": 1
                 }
               },
               "required": [
-                "do"
+                "do",
+                "id",
+                "why"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "do": {
+                  "type": "string",
+                  "const": "stop"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "why": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "do",
+                "id",
+                "why"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "do": {
+                  "type": "string",
+                  "const": "rewrite"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "why": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "do",
+                "id",
+                "why"
               ],
               "additionalProperties": false
             }
@@ -1436,8 +1500,7 @@
                   "const": "propose"
                 },
                 "file": {
-                  "type": "string",
-                  "minLength": 1
+                  "type": "string"
                 }
               },
               "required": [
@@ -1451,11 +1514,23 @@
               "properties": {
                 "do": {
                   "type": "string",
+                  "const": "list"
+                }
+              },
+              "required": [
+                "do"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "do": {
+                  "type": "string",
                   "const": "status"
                 },
                 "id": {
-                  "type": "string",
-                  "minLength": 1
+                  "type": "string"
                 }
               },
               "required": [
@@ -1469,11 +1544,64 @@
               "properties": {
                 "do": {
                   "type": "string",
-                  "const": "list"
+                  "const": "continue"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "why": {
+                  "type": "string",
+                  "minLength": 1
                 }
               },
               "required": [
-                "do"
+                "do",
+                "id",
+                "why"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "do": {
+                  "type": "string",
+                  "const": "stop"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "why": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "do",
+                "id",
+                "why"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "do": {
+                  "type": "string",
+                  "const": "rewrite"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "why": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "do",
+                "id",
+                "why"
               ],
               "additionalProperties": false
             }

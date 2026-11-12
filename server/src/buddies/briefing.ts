@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import type { TurnCapabilities } from '@nbardy/agent-cli';
 import type { Buddy, Doc } from '@unleashd/buddies-core';
 import type { BuddyContext, BuddyExecution, InstalledAgent } from '@unleashd/shared';
 import { buddyExecutionPreferences } from '@unleashd/shared';
@@ -15,11 +14,6 @@ export interface ResolvedBuddyConversation {
   /** The profile's harness/model, or `no-agent` (config-mapping.ts buddyExecutionPreferences). */
   execution: BuddyExecution;
 }
-
-export type TurnDirectory =
-  | { t: 'workspace' }
-  | { t: 'call'; runId: string; path: string; capabilities: TurnCapabilities };
-export const WORKSPACE_DIRECTORY: TurnDirectory = { t: 'workspace' };
 
 const MAX = { soul: 10_000, memory: 6_000, tasks: 4_000 } as const;
 const BRIEFING_MAX_CHARACTERS = 40_000;
@@ -43,23 +37,11 @@ export const BUDDY_TOOL_GUIDE = [
   'Detailed notes: agent_notes/<date>_<topic>.md, written and searched with file tools.',
   'Background worker: post kind "request" with worker {provider, model} to {direct:[]} (you) or a report: a tracked run whose answer wakes you. While it runs, post {channel:{request:id, to:"worker"}} directs it and its {to:"parent"} asks you; each lands after the next tool call. Never shell out to agent CLIs.',
   'runs: scoped slim rows with waiting reasons, plus get/cancel. schedule: scoped cron runs. team: list rows, then get one body.',
-  'expedition: propose {file} previews a keyed expedition file and posts a Launch card. status and list read; only the owner launches, steers or stops.',
+  'expedition: propose {file} posts a Launch card; only the owner launches. Its manager Buddy may continue, stop or rewrite through the tool; list and status read.',
   'Never edit the Buddies database or files to change Buddy state. A denied tool is an authority boundary; do not route around it.',
   'Do not copy task status into memory; save shared work in files, linked from posts. Workers: post a one-line progress note on the Task at each milestone; the final answer carries evidence paths (commits, files, test names), not prose.',
   'Owner-needed action: request it in the owner DM ({direct:["owner"]}), naming the action and risk; act only after an explicit answer.',
 ].join('\n');
-
-// An expedition call's turn is shown no tools (grants.ts `call`), so it is told so instead of the
-// tool guide: its request names the answer format and states the limits its tools are set to.
-export const CALL_TOOL_GUIDE = [
-  'EXPEDITION CALL: this turn has NO Buddy tools (no posts, workers, tasks or docs).',
-  'Do the work with the tools this turn has; the request states their limits. Your final message is your answer, in the exact format the request names; nothing else you write is read.',
-].join('\n');
-/** The guide a turn's briefing carries, by its directory. */
-const GUIDE: { readonly [K in TurnDirectory['t']]: string } = {
-  workspace: BUDDY_TOOL_GUIDE,
-  call: CALL_TOOL_GUIDE,
-};
 
 const memoryText = (doc: Doc | null, empty: string) =>
   doc ? `Revision: ${doc.revision}\n${bounded(doc.content, MAX.memory)}` : `Revision: 0\n${empty}`;
@@ -89,8 +71,7 @@ export async function readBuddyState(core: BuddiesCore, buddyId: string) {
 export async function composeBriefing(
   core: BuddiesCore,
   context: BuddyContext,
-  installed: InstalledAgent,
-  directory: TurnDirectory
+  installed: InstalledAgent
 ): Promise<ResolvedBuddyConversation> {
   const buddy: Buddy = await core.getBuddy(context.buddyId);
   if (buddy.status !== 'active')
@@ -99,7 +80,7 @@ export async function composeBriefing(
   if (!workspace) throw new Error(`Buddy workspace ${context.workspaceId} not found`);
   const { soul, working, longTerm, tasks } = await readBuddyState(core, buddy.id);
   const open = tasks.filter((task) => task.status !== 'done' && task.status !== 'cancelled');
-  const guide = GUIDE[directory.t];
+  const guide = BUDDY_TOOL_GUIDE;
   const briefing = [
     `You are ${buddy.name}. This is your persistent Buddy identity.`,
     `Role: ${buddy.role}`,
@@ -146,7 +127,7 @@ export async function composeBriefing(
     // Steady-state turns re-brief only when this changes, so it covers what the Buddy must see
     // promptly (identity, soul, memory) and leaves out what changes every turn (tasks).
     memoryGeneration: `memory:${working?.revision ?? 0}:${longTerm?.revision ?? 0}:identity:${identity}`,
-    workingDirectory: directory.t === 'workspace' ? workspace.rootPath : directory.path,
+    workingDirectory: workspace.rootPath,
     execution: profileExecution(buddy, installed),
   };
 }
@@ -166,67 +147,19 @@ const keyOf = (context: BuddyContext) => JSON.stringify([context.buddyId, contex
 
 export type Briefings = ReturnType<typeof createBriefings>;
 
-// Pattern: sum-types (docs/patterns.md#sum-types)
-/** What kind of turn a warmed briefing is for: an expedition call, with what its turn may do, or
- * any other Buddy turn. It picks the turn's grant role (policy-port.ts) and its harness request
- * (turn-policy.ts `SEAT_REQUEST`). */
-export type TurnSeat =
-  | { readonly t: 'call'; readonly capabilities: TurnCapabilities }
-  | { readonly t: 'buddy' };
-const BUDDY_SEAT: TurnSeat = { t: 'buddy' };
-type Kept = { readonly resolved: ResolvedBuddyConversation; readonly seat: TurnSeat };
-/** Where a warmed briefing is kept, by its directory: a per-run directory by run id, else by Buddy. */
-const KEEP: {
-  readonly [K in TurnDirectory['t']]: (
-    d: Extract<TurnDirectory, { t: K }>
-  ) => { t: 'run'; runId: string; seat: TurnSeat } | { t: 'buddy' };
-} = {
-  workspace: () => ({ t: 'buddy' }),
-  call: (d) => ({ t: 'run', runId: d.runId, seat: { t: 'call', capabilities: d.capabilities } }),
-};
-
-/**
- * The runtime reads a briefing synchronously as it admits a turn, while the core is async. The
- * runner (and the conversation creator) warm the entry right before each turn, so `current` reads
- * what was just composed. A cold entry is an error, never an empty briefing. A call
- * run is kept by run id (concurrent runs of one Buddy must not share a directory: two calls on the
- * one seat Buddy run side by side), forgotten at settle. Any other turn is kept by Buddy.
- */
-export function createBriefings(
-  core: BuddiesCore,
-  installed: () => InstalledAgent,
-  directoryOf: (context: BuddyContext) => Promise<TurnDirectory>
-) {
+// Briefings are warmed once at admission and read synchronously by the turn policy.
+export function createBriefings(core: BuddiesCore, installed: () => InstalledAgent) {
   const cache = new Map<string, ResolvedBuddyConversation>();
-  const runs = new Map<string, Kept>();
-  const kept = (context: BuddyContext): Kept | undefined => {
-    const own = context.coordinationRunId ? runs.get(context.coordinationRunId) : undefined;
-    if (own) return own;
-    const resolved = cache.get(keyOf(context));
-    return resolved && { resolved, seat: BUDDY_SEAT };
-  };
   return {
-    async warm(context: BuddyContext): Promise<ResolvedBuddyConversation> {
-      const directory = await directoryOf(context);
-      const resolved = await composeBriefing(core, context, installed(), directory);
-      const where = (KEEP[directory.t] as (d: TurnDirectory) => ReturnType<(typeof KEEP)['call']>)(
-        directory
-      );
-      if (where.t === 'run') runs.set(where.runId, { resolved, seat: where.seat });
-      else cache.set(keyOf(context), resolved);
+    async warm(context: BuddyContext) {
+      const resolved = await composeBriefing(core, context, installed());
+      cache.set(keyOf(context), resolved);
       return resolved;
     },
-    forget: (runId: string) => runs.delete(runId),
-    current(context: BuddyContext): ResolvedBuddyConversation {
-      const found = kept(context);
-      if (!found) throw new Error(`No briefing was composed for ${keyOf(context)} before its turn`);
-      return found.resolved;
-    },
-    /** The seat of the briefing `current` returns (same lookup, same error when cold). */
-    seat(context: BuddyContext): TurnSeat {
-      const found = kept(context);
-      if (!found) throw new Error(`No briefing was composed for ${keyOf(context)} before its turn`);
-      return found.seat;
+    current(context: BuddyContext) {
+      const resolved = cache.get(keyOf(context));
+      if (!resolved) throw new Error('No briefing was composed before the turn');
+      return resolved;
     },
   };
 }

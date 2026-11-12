@@ -10,7 +10,6 @@ import { UpstreamStatusSchema, UpstreamUpdateResultSchema, mentionedIds } from '
 import express from 'express';
 import { OWNER, managerRef } from '../src/buddies/core';
 import { createBuddyEvents } from '../src/buddies/events';
-import { NO_HOST_COMMANDS } from '../src/buddies/routes';
 import { checkUpstream, resolveCheckout } from '../src/upstream/git-upstream';
 import { createUpstreamService } from '../src/upstream/routes';
 import { BOOTSTRAP_KEY, bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
@@ -332,7 +331,6 @@ test('update posts one @mention of the Release Manager per upstream sha', async 
     core,
     events,
     uploadsRoot: () => join(root, 'uploads'),
-    hostCommands: NO_HOST_COMMANDS,
   });
   const app = express();
   service.registerRoutes(app);

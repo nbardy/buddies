@@ -40,12 +40,7 @@ import { buddyWrite, retryFailedReply } from '../../client/src/components/buddie
 import { choiceLabel, mentionChoice } from '../../client/src/components/buddies/channel-text';
 import { scheduleFieldsOf } from '../../client/src/components/buddies/schedule-fields';
 import { reorderTasks } from '../../client/src/components/buddies/task-actions';
-import {
-  BUDDY_TOOL_GUIDE,
-  WORKSPACE_DIRECTORY,
-  composeBriefing,
-  createBriefings,
-} from '../src/buddies/briefing';
+import { BUDDY_TOOL_GUIDE, composeBriefing, createBriefings } from '../src/buddies/briefing';
 import { type StableConversationPorts, slotOf } from '../src/buddies/buddy-conversation-slots';
 import {
   type GateVerdict,
@@ -67,7 +62,7 @@ import { FOLLOW_GRACE_MS, startMcpEndpoint } from '../src/buddies/mcp';
 import { createMemoryReviewer } from '../src/buddies/memory-review';
 import { wakes } from '../src/buddies/mentions';
 import { createBuddyPolicyPort } from '../src/buddies/policy-port';
-import { NO_HOST_COMMANDS, registerBuddyRoutes } from '../src/buddies/routes';
+import { registerBuddyRoutes } from '../src/buddies/routes';
 import { ENVELOPE_CHARS, createRunner } from '../src/buddies/runner';
 import { providerDefaultModel, workerConversationConfig } from '../src/buddies/worker-config';
 import { BUDDY_RUN_LEASE_MS, TURN_MAX_RUNTIME_MS } from '../src/constants/timeouts';
@@ -220,7 +215,7 @@ async function world(reopen?: string, realProvider = false) {
   mkdirSync(agentBin, { recursive: true });
   writeFileSync(join(agentBin, 'codex'), '#!/bin/sh\n', { mode: 0o755 });
   const installed = () => installedAgent({ PATH: agentBin });
-  const briefings = createBriefings(core, installed, async () => WORKSPACE_DIRECTORY);
+  const briefings = createBriefings(core, installed);
   // A transcript per conversation id, read through the same MessageSource shape production uses.
   const transcripts = new Map<string, MessagePage['messages']>();
   const endpoint = await startMcpEndpoint({
@@ -1378,7 +1373,7 @@ test('an explicit id that is not on the roster is refused, never retargeted to a
 test("a Buddy's @mention wakes that Buddy, and Buddy hand-offs are not capped", async () => {
   const w = await world();
   try {
-    const thread = async (rootId: string) =>
+    const _thread = async (rootId: string) =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId }, null, 50)).posts.reverse();
     const root = await w.post(
       OWNER,
@@ -3403,12 +3398,7 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
     );
     assert.equal(JSON.parse(receipt.payload).status, 'complete');
 
-    const next = await composeBriefing(
-      core,
-      chat('chat-B'),
-      { kind: 'agent', provider: 'codex' },
-      WORKSPACE_DIRECTORY
-    );
+    const next = await composeBriefing(core, chat('chat-B'), { kind: 'agent', provider: 'codex' });
     assert.match(next.briefing, /step 2 of 3 done/, 'working memory reaches the next chat');
     assert.match(next.briefing, /Owner prefers restrained UI/, 'long-term memory reaches it');
     const ownerTab = await core.readDoc(OWNER, {
@@ -3472,12 +3462,7 @@ test('briefing generation tracks its MCP guide and scope identity', async () => 
   const w = await world();
   const context = { buddyId: w.lead.id, workspaceId: w.ws };
   try {
-    const before = await composeBriefing(
-      w.core,
-      context,
-      { kind: 'agent', provider: 'codex' },
-      WORKSPACE_DIRECTORY
-    );
+    const before = await composeBriefing(w.core, context, { kind: 'agent', provider: 'codex' });
     assert.match(before.briefing, new RegExp(`Your ids: buddyId ${w.lead.id}`));
     const identity = createHash('sha256')
       .update(JSON.stringify([w.lead.name, w.lead.role, 0, w.lead.id, w.ws, BUDDY_TOOL_GUIDE]))
@@ -3780,7 +3765,6 @@ async function ownerHttp(w: Awaited<ReturnType<typeof world>>) {
     runner: w.runner,
     channels: w.channels,
     uploadsRoot: () => join(w.scratch, 'uploads'),
-    hostCommands: NO_HOST_COMMANDS,
     channelChanged: () => undefined,
     onBuddyArchived: () => undefined,
     createBuilderConversation: async (workingDirectory) => {

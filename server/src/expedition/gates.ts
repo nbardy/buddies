@@ -32,6 +32,7 @@ export const Contract = z
   })
   .strict();
 export type Contract = z.infer<typeof Contract>;
+export type ContractInput = z.input<typeof Contract>;
 export const defaultCap = (c: Contract) => ({
   usd: Math.min(c.budget.usd, Math.min(1, Math.max(0.25, c.budget.usd * 0.1))),
   minutes: Math.min(c.budget.hours * 60, Math.min(20, Math.max(5, c.budget.hours * 6))),

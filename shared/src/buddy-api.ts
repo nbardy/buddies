@@ -12,7 +12,7 @@ import type {
 import { z } from 'zod';
 import { OwnerPostMentionConfigSchema } from './buddy-channel-posts.js';
 import { type ConversationConfig, ConversationConfigSchema } from './conversation-config.js';
-import type { KeyedPreview, KeyedView } from './expedition-keyed.js';
+import type { ExpeditionView } from './expedition.js';
 import type { UpstreamUpdateResult } from './upstream.js';
 
 // Pattern: one-type-source (docs/patterns.md#one-type-source)
@@ -209,37 +209,6 @@ export const WAKE_MESSAGE = [
 ].join('\n');
 
 const NoBodySchema = z.undefined();
-// Keyed expeditions: the owner's acts (CONNECT_PLAN §4). `t` names the act, as in expedition-keyed.
-const KeyedActSchema = z.discriminatedUnion('t', [
-  z.object({ t: z.literal('pause') }).strict(),
-  z.object({ t: z.literal('resume') }).strict(),
-  z.object({ t: z.literal('stop') }).strict(),
-  z.object({ t: z.literal('extend'), hours: z.number().positive() }).strict(),
-  z.object({ t: z.literal('retry'), key: z.string().min(1) }).strict(),
-]);
-export type KeyedAct = z.infer<typeof KeyedActSchema>;
-const KeyedAnswerSchema = z.union([
-  z.object({ answer: z.string().min(1) }).strict(),
-  z.object({ confirm: z.boolean() }).strict(),
-]);
-const KeyedApprovalSchema = z.object({ approve: z.boolean() }).strict();
-/** One TypeScript plan file on the server's disk: absolute, never relative to
- * the server's cwd. */
-const PlanFile = z
-  .string()
-  .min(1)
-  .refine((p) => p.startsWith('/'), 'must be an absolute path')
-  .refine((p) => p.endsWith('.ts'), 'must be a .ts file');
-const KeyedPreviewSchema = z.object({ file: PlanFile }).strict();
-// `digest` is the proposal card's (expeditions-v1/digest.ts): given, the server launches only a
-// file whose bytes still hash to it. Absent (direct HTTP), no check.
-const KeyedLaunchSchema = z
-  .object({
-    workspaceId: z.string().min(1),
-    file: PlanFile,
-    digest: z.string().min(1).optional(),
-  })
-  .strict();
 export const BuddyDocKindSchema = z.enum(['soul', 'working', 'long_term', 'shared']);
 // Pattern: table-driven (docs/patterns.md#table-driven)
 // This table owns the wire: client paths, methods and bodies; server routes and success statuses.
@@ -384,54 +353,26 @@ export const buddyMutations = {
     status: 201,
     body: NoBodySchema,
   },
-  // Keyed expeditions (docs/expeditions/keyed/v1/CONNECT_PLAN.md §4). Served by the keyed-expedition
-  // routes, not server/src/buddies/routes.ts; each answers with the refreshed view.
-  'keyed.act': {
+  'expedition.launch': {
     method: 'POST',
-    path: '/api/buddies/keyed-expeditions/:id/act',
+    path: '/api/buddies/expeditions/launch',
     status: 200,
-    body: KeyedActSchema,
+    body: z.object({ file: z.string(), hash: z.string(), workspaceId: z.string() }).strict(),
   },
-  // A text ask takes `answer`, a confirm ask takes `confirm`; `:ref` is the ask's RefId.
-  'keyed.answer': {
+  'expedition.answer': {
     method: 'POST',
-    path: '/api/buddies/keyed-expeditions/:id/asks/:ref',
+    path: '/api/buddies/expeditions/:id/answer',
     status: 200,
-    body: KeyedAnswerSchema,
-  },
-  'keyed.approval': {
-    method: 'POST',
-    path: '/api/buddies/keyed-expeditions/:id/approval',
-    status: 200,
-    body: KeyedApprovalSchema,
-  },
-  // The gates on a plan file, run without writing anything (a rejected plan is a 200 too).
-  'keyed.preview': {
-    method: 'POST',
-    path: '/api/buddies/keyed-expeditions/preview',
-    status: 200,
-    body: KeyedPreviewSchema,
-  },
-  // Owner HTTP only (CONNECT_PLAN §7.2): no Buddy tool reaches it.
-  'keyed.launch': {
-    method: 'POST',
-    path: '/api/buddies/keyed-expeditions/launch',
-    status: 201,
-    body: KeyedLaunchSchema,
+    body: z.object({ key: z.string(), value: z.union([z.string(), z.boolean()]) }).strict(),
   },
 } as const;
 
 export type BuddyMutation = keyof typeof buddyMutations;
 /** The mutations server/src/buddies/routes.ts serves; the rest have their own route owners
- * (server/src/upstream, server/src/expeditions-v1). */
+ * (server/src/upstream, server/src/expedition). */
 export type BuddyRouteMutation = Exclude<
   BuddyMutation,
-  | 'upstream.update'
-  | 'keyed.act'
-  | 'keyed.answer'
-  | 'keyed.approval'
-  | 'keyed.preview'
-  | 'keyed.launch'
+  'upstream.update' | 'expedition.launch' | 'expedition.answer'
 >;
 type Contract<K extends BuddyMutation> = (typeof buddyMutations)[K];
 export type BuddyMutationBody<K extends BuddyMutation> = z.input<Contract<K>['body']>;
@@ -488,11 +429,8 @@ export interface BuddyMutationResults {
   'reply.retry': ReplyRetryResult;
   read: { ok: boolean };
   'upstream.update': UpstreamUpdateResult;
-  'keyed.act': KeyedView;
-  'keyed.answer': KeyedView;
-  'keyed.approval': KeyedView;
-  'keyed.preview': KeyedPreview;
-  'keyed.launch': KeyedView;
+  'expedition.launch': ExpeditionView;
+  'expedition.answer': ExpeditionView;
 }
 export type BuddyMutationRoute<K extends BuddyMutation> =
   `${Contract<K>['method']} ${Contract<K>['status']} ${Contract<K>['path']}`;

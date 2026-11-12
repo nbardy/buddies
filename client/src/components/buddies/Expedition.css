@@ -1,0 +1,41 @@
+.expedition-scroll {
+  overflow: auto;
+  min-height: 0;
+  padding: var(--sp-4);
+  flex: 1;
+}
+.expedition {
+  max-width: 64rem;
+  margin: auto;
+  padding-block: var(--sp-4);
+}
+.expedition h2, .expedition-proposal h3 {
+  margin: 0;
+}
+.expedition-goal {
+  white-space: pre-wrap;
+}
+.expedition-steps {
+  list-style: none;
+  padding: 0;
+}
+.expedition-step, .expedition-question, .expedition-proposal {
+  border: 1px solid var(--border-color);
+  border-radius: var(--ui-radius);
+  padding: var(--sp-3);
+  overflow-wrap: anywhere;
+}
+.expedition-question {
+  border-color: var(--accent-color);
+}
+.expedition-commit {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.expedition-question textarea {
+  min-height: 5rem;
+  width: 100%;
+}
+[data-device="mobile"] .expedition-scroll {
+  padding: var(--sp-3);
+}

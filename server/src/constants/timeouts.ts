@@ -78,12 +78,6 @@ export const BUDDY_BACKGROUND_TURN_MS = readPositiveIntEnv('CWV_BUDDY_BACKGROUND
 /** The runner's backstop tick: due schedules, runs no write woke (a freed slot), and the claim
  * gate's lease expiry, so a dead holder's run ends within BUDDY_RUN_LEASE_MS plus this. */
 export const BUDDY_RUNNER_BACKSTOP_MS = readPositiveIntEnv('CWV_BUDDY_RUNNER_BACKSTOP_MS', 5_000);
-/** How long a keyed expedition call's settle waits for ingest to price its turns before it reports
- * `unreported` (expeditions-v1/executor/calls.ts `CallTiming`). Tests shorten it. */
-export const EXPEDITION_CALL_USAGE_WAIT_MS = readPositiveIntEnv(
-  'CWV_EXPEDITION_CALL_USAGE_WAIT_MS',
-  60_000
-);
 export const SWARM_POLL_INTERVAL_MS = readPositiveIntEnv('CWV_SWARM_POLL_INTERVAL_MS', 2_000);
 export const SWARM_POLL_THROTTLE_MS = readPositiveIntEnv('CWV_SWARM_POLL_THROTTLE_MS', 1_500);
 export const SWARM_CONTEXT_COMMAND_TIMEOUT_MS = 8_000;
