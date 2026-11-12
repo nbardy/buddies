@@ -35,13 +35,14 @@ async function main(){
  const out=text=>say(codex?{type:'item.completed',item:{type:'agent_message',text}}:{type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text}}});
  const done=text=>{out(text);if(!codex)say({type:'assistant',message:{content:[],usage:{input_tokens:10,output_tokens:2,cache_read_input_tokens:0,cache_creation_input_tokens:0}}});say(codex?{type:'turn.completed',usage:{input_tokens:10,output_tokens:2}}:{type:'result',subtype:'success',result:text});};
  say(codex?{type:'thread.started',thread_id:'fake-'+Date.now()}:{type:'system',subtype:'init',session_id:'fake-'+Date.now()});
- const manager=/Expedition ([a-f0-9-]+) needs your decision: rewrite/.exec(prompt);
- if(manager&&!fs.existsSync(path.join(fake,'rewritten'))){
+ const manager=/Expedition ([a-f0-9-]+) needs your decision: (rewrite|stop)/.exec(prompt);
+ if(manager&&(manager[2]==='stop'||!fs.existsSync(path.join(fake,'rewritten')))){
   const {Client}=require(process.env.SDK_CLIENT),{StreamableHTTPClientTransport}=require(process.env.SDK_HTTP);
   const spec=Object.values(JSON.parse(process.argv[process.argv.indexOf('--mcp-config')+1]).mcpServers)[0];
   const headers=Object.fromEntries(Object.entries(spec.headers).map(([k,v])=>[k,v.replace(/\$\{([^}]+)\}/g,(_,n)=>process.env[n])]));
   const client=new Client({name:'fake-manager',version:'1'});
   await client.connect(new StreamableHTTPClientTransport(new URL(spec.url),{requestInit:{headers}}));
+  if(manager[2]==='stop'){await client.callTool({name:'expedition',arguments:{action:{do:'stop',id:manager[1],why:'Done with this proof'}}});await client.close();done('Stopped');return;}
   const folder=/Read (.+)\/log.jsonl/.exec(prompt)[1];
   const next=fs.readFileSync(path.join(fake,'next.ts'),'utf8');
   fs.writeFileSync(path.join(folder,'plan.expedition.ts'),next.replace("goal:'test'","goal:'changed'"));
@@ -284,4 +285,12 @@ test('real backend: fan-out, restart adoption, checkout judges, question, rewrit
   fs.writeFileSync(path.join(fake, 'resource.go'), '');
   await eventually(async () => (await view(resources.id)).status === 'met', 'resource released');
   assert.equal(count('blocked'), 1);
+  const stopped = await launch(
+    plan(
+      '',
+      `const [out]=await Promise.all([x.ask('pending'),x.checkin('stop')]);return {out,ref:{id:'owner'}};`
+    )
+  );
+  await eventually(async () => (await view(stopped.id)).status === 'stopped', 'manager stop');
+  assert.deepEqual((await view(stopped.id)).questions, [], 'stopped questions cannot be answered');
 });

@@ -122,7 +122,9 @@ export function createExpeditions(
         (n, [h, c]) => n + (settled.has(h) ? 0 : capOf(c, launch.contract)),
         0
       ),
-      questions: [...questions.values()],
+      // A stopped run refuses answers; do not leave an actionable owner form in its view.
+      // Guard: expedition-backend manager stop closes the questions.
+      questions: status(r) === 'stopped' ? [] : [...questions.values()],
       versions: r.log.flatMap((e) => (e.t === 'plan' ? [e.version] : [])),
       reason: latest?.reason,
       steps: r.log.flatMap((e) => {
