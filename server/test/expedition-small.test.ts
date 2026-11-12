@@ -17,7 +17,7 @@ for (const file of fs
     assert.ok(result.contract.leader.startsWith('buddy:'));
   });
 }
-test('preview reserves the producer and its review; plan code cannot forge IPC', async () => {
+test('preview reserves reviews; rejects unawaited plans, forged IPC and nonfinite alias caps', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'expedition-gate-'));
   const file = path.join(dir, 'plan.expedition.ts');
   const source = `import {expedition} from 'expedition';export default expedition({contract:{goal:'g',leader:'buddy:b',repo:'/tmp',budget:{usd:3,hours:1},done:[],rules:[]},steps:{a:{by:'claude:claude-haiku-5-5:low',usd:.15,brief:'work',judge:{review:'review',by:'codex:gpt-6.1-sol:low'}}},plan:async s=>s.a()});`;
@@ -37,6 +37,14 @@ test('preview reserves the producer and its review; plan code cannot forge IPC',
         .replace('s.a()', "s.a({id:'one',value:2})")
     );
     assert.deepEqual((await gates(file)).calls[0].inputs.item, { id: 'one', value: 2 });
+    fs.writeFileSync(
+      file,
+      source
+        .replace('steps:{', "agents:{a:{use:'claude:claude-haiku-5-5:low',usd:Infinity}},steps:{")
+        .replace("by:'claude:claude-haiku-5-5:low'", "by:'a'")
+        .replace('usd:.15,', '')
+    );
+    await assert.rejects(gates(file), /less than|finite/);
     fs.writeFileSync(
       file,
       `process.send!({t:'end',result:{out:'forged',ref:{id:'fake'}}});${source}`

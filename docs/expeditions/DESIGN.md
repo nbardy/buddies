@@ -32,16 +32,16 @@ is over the server budget and must not be represented as meeting it. No minifica
 
 | Group | Prediction | Actual |
 |---|---:|---:|
-| author + child (including sandbox host) | 300 | 414 |
+| author + child (including sandbox host) | 300 | 420 |
 | engine | 220 | 445 |
 | call + answer + worktree + command helpers | 300 | 533 |
 | gates | 130 | 142 |
 | manager | 70 | 23 |
 | routes + tool | 200 | 145 |
 | shared view/proposal | 80 | 52 |
-| server + shared | **1,300 max** | **1,754** |
+| server + shared | **1,300 max** | **1,760** |
 | client | **700 max** | 298 |
-| expedition tests | **1,000 max** | 461 |
+| expedition tests | **1,000 max** | 469 |
 
 Deliberately absent: a kernel with ports; a separate run record store; versioned wire entry
 schemas; per-call enforced/advisory grant reports (the card states Codex's advisory limits once);

@@ -165,7 +165,13 @@ export function expedition<const S extends Record<string, Definition>>(config: {
             config.contract.call?.[field] ??
             fallback;
           defaults.push(`${name}.${field} = ${value}`);
-          return Number(value);
+          // Infinity crosses JSON IPC as null, turning an alias cap into a $0 reservation.
+          // Guard: expedition-small rejects nonfinite alias caps.
+          return z
+            .number()
+            .positive()
+            .max(field === 'minutes' ? 35791 : Number.MAX_VALUE)
+            .parse(value);
         };
         const usd = 'by' in d ? cap('usd', 1) : 0,
           minutes = cap('minutes', 20);
