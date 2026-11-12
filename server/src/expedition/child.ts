@@ -7,7 +7,7 @@ import type { Message } from './author';
 
 export const AUTHOR = path.join(__dirname, 'author.ts');
 // Pattern: capability-grants (docs/patterns.md#capability-grants)
-// Copy only the source: tsx's case probes must never read the owner's adjacent files.
+// Copy only the plan source; its neighboring files are outside the child's read permission.
 export function runPlan(
   file: string,
   receive: (m: Message, reply: (result: unknown) => void) => void
@@ -15,21 +15,16 @@ export function runPlan(
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'expedition-plan-')));
   const source = path.join(dir, 'plan.expedition.ts');
   fs.copyFileSync(file, source);
-  const loader = require.resolve('tsx');
+  const loader = require.resolve('zod');
   const store = `${fs.realpathSync(loader).split(`${path.sep}.pnpm${path.sep}`)[0]}/.pnpm`;
   const ancestors = (p: string): string[] =>
     path.dirname(p) === p
       ? []
       : [path.join(path.dirname(p), 'package.json'), ...ancestors(path.dirname(p))];
-  const flip = (p: string) =>
-    [...p].map((c) => (c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase())).join('');
   const roots = [
     dir,
-    flip(dir),
     __dirname,
-    flip(__dirname),
     store,
-    path.resolve(__dirname, '../../../shared/dist'),
     path.resolve(__dirname, '../../node_modules'),
     ...ancestors(dir),
     ...ancestors(__dirname),
@@ -38,21 +33,15 @@ export function runPlan(
     process.execPath,
     [
       '--permission',
-      '--allow-worker',
       ...roots.map((p) => `--allow-fs-read=${p}`),
       '--disable-warning=SecurityWarning',
-      '--import',
-      loader,
       path.join(__dirname, 'child.mjs'),
       source,
       AUTHOR,
     ],
     {
       cwd: dir,
-      env: {
-        TSX_DISABLE_CACHE: '1',
-        TSX_TSCONFIG_PATH: path.join(__dirname, 'plan-tsconfig.json'),
-      },
+      env: {},
       detached: true,
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     }
@@ -66,7 +55,11 @@ export function runPlan(
     if (ended) return;
     if (m.t === 'waiting') clearTimeout(timer);
     receive(m, (result) => {
-      if (child.connected) child.send({ seq: 'seq' in m ? m.seq : 0, result });
+      if (child.connected) {
+        clearTimeout(timer);
+        timer = setTimeout(labelled('expedition-plan-limit', expired), 30_000);
+        child.send({ seq: 'seq' in m ? m.seq : 0, result });
+      }
     });
     if (m.t === 'end' || m.t === 'error') kill();
   });
@@ -84,13 +77,11 @@ export function runPlan(
       resolve();
     })
   );
-  const timer = setTimeout(
-    labelled('expedition-plan-limit', () => {
-      receive({ t: 'error', why: 'Plan exceeded execution time without waiting' }, () => {});
-      kill();
-    }),
-    30_000
-  );
+  const expired = () => {
+    receive({ t: 'error', why: 'Plan exceeded execution time without waiting' }, () => {});
+    kill();
+  };
+  let timer = setTimeout(labelled('expedition-plan-limit', expired), 30_000);
   child.on('message', () => timer.unref());
   void closed.then(() => clearTimeout(timer));
   return {

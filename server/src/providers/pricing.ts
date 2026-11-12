@@ -2,7 +2,7 @@ import type { UsageGroup } from '@unleashd/ingest';
 import type { Provider as ProviderName } from '@unleashd/shared';
 
 // What provider-counted tokens cost, in one place: the usage panel (http/usage-routes.ts) and an
-// expedition call's charge (expeditions-v1/executor/usage.ts) both read it.
+// expedition call's charge (expedition/call.ts) both read it.
 //
 // Two different questions, two functions:
 // - `estimateUsd`: the usage panel's ESTIMATE, one approximate row per provider. Unchanged from
@@ -24,7 +24,7 @@ import type { Provider as ProviderName } from '@unleashd/shared';
 // second real run's Claude turns, all of which wrote at the 1-hour tier, were recorded at $0.332
 // against the CLIs' own $0.455 (27% low; the gap was the 1-hour premium on every row). A row whose
 // tier was never read counts as 1-hour (the crate's rule): a budget must never under-count.
-// Guard: server/test/expeditions-v1-executor.test.ts (the run's probeClaude row prices to the CLI's
+// Guard: server/test/expedition-small.test.ts (the run's probeClaude row prices to the CLI's
 // own figure).
 // Codex rates: OpenAI's published API pricing, https://developers.openai.com/api/docs/pricing
 // (fetched 2026-11-11), Standard tier, short context (<=272K input tokens), per 1M tokens. Longer

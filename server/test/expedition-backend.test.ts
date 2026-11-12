@@ -52,11 +52,20 @@ async function main(){
   fs.writeFileSync(path.join(fake,'rewritten'),'');await client.close();done('Manager rewrote plan');return;
  }
  if(!tag){done('ok');return;}
+ if(process.argv.includes('--dangerously-skip-permissions')||process.argv.includes('--dangerously-bypass-approvals-and-sandbox'))throw Error('Expedition omitted capabilities');
+ fs.writeFileSync(path.join(fake,tag+'.argv'),JSON.stringify(process.argv.slice(2)));
+ if(codex ? !process.argv.includes('-s') : !process.argv.includes('dontAsk'))throw Error('Missing restrictive capability argv');
  fs.appendFileSync(path.join(fake,'spawns'),tag+' '+process.pid+'\n');
  fs.writeFileSync(path.join(fake,tag+'.started'),String(process.pid));
- if(tag==='slow'||tag==='drop')await new Promise(resolve=>{const t=setInterval(()=>{if(fs.existsSync(path.join(fake,tag+'.go'))){clearInterval(t);resolve()}},10)});
+ if(tag==='slow'||tag==='drop'||tag==='resource')await new Promise(resolve=>{const t=setInterval(()=>{if(fs.existsSync(path.join(fake,tag+'.go'))){clearInterval(t);resolve()}},10)});
  if(tag==='edit'){
   fs.writeFileSync('value.txt','after\n');cp.execFileSync('git',['add','value.txt']);cp.execFileSync('git',['-c','commit.gpgsign=false','commit','-qm','edit']);
+ }
+ if(tag==='review'){
+  const code=/THE CODE: exact commit (\S+) at ([^;]+); diff ([^\s]+)/.exec(prompt);
+  if(!code)throw Error('Review was not given code');
+  const file=path.join(code[2],'value.txt'),diff=code[3].replace(/\.$/,'');
+  if(fs.readFileSync(file,'utf8')!=='after\n'||!fs.readFileSync(diff,'utf8').includes('+after'))throw Error('Wrong review source or diff');
  }
  const text=tag==='bad'?'not json':tag==='review'?JSON.stringify({verdict:'yes',why:'SOURCE after; DIFF +after'}):JSON.stringify({summary:tag,files:tag==='edit'?['value.txt']:[]});
  done(text);
@@ -210,7 +219,7 @@ test('real backend: fan-out, restart adoption, checkout judges, question, rewrit
     plan(
       `edit:{by:'${who}',checkout:true,brief:'TAG:edit',judge:{review:'TAG:review',by:'codex:gpt-6.1-sol:low'}},check:{run:'node check.cjs'}`,
       `const a=await s.edit();await s.check({on:a});return a;`
-    )
+    ).replace('done:[]', `done:[{review:'TAG:review',by:'codex:gpt-6.1-sol:low'}]`)
   );
   await eventually(
     async () => ['met', 'held'].includes((await view(checkoutRun.id)).status),
@@ -224,15 +233,21 @@ test('real backend: fan-out, restart adoption, checkout judges, question, rewrit
   const initial = plan(
     `first:{by:'${who}',brief:'TAG:first'},drop:{by:'${who}',brief:'TAG:drop'}`,
     `const a=await s.first();await Promise.all([s.drop.try(),x.checkin('rewrite')]);return a;`
-  );
+  ).replace('autoApply:{usd:1}', 'autoApply:{usd:0}');
   fs.writeFileSync(
     path.join(fake, 'next.ts'),
     plan(
       `first:{by:'${who}',brief:'TAG:first'},added:{by:'${who}',brief:'TAG:added'}`,
       `const a=await s.first();await x.checkin('rewrite');await s.added();return a;`
-    )
+    ).replace('autoApply:{usd:1}', 'autoApply:{usd:0}')
   );
   const rewritten = await launch(initial);
+  await eventually(
+    async () => (await view(rewritten.id)).questions.some((q) => q.kind === 'confirm'),
+    'rewrite cost approval'
+  );
+  const approval = (await view(rewritten.id)).questions.find((q) => q.kind === 'confirm')!;
+  await api(`/api/buddies/expeditions/${rewritten.id}/answer`, { key: approval.key, value: true });
   await eventually(
     async () => (await view(rewritten.id)).status === 'met',
     'manager rewrite completed'
@@ -242,6 +257,10 @@ test('real backend: fan-out, restart adoption, checkout judges, question, rewrit
   assert.equal(count('drop'), 1);
   assert.equal(count('added'), 1);
   assert.equal((await view(rewritten.id)).versions.length, 2);
+  assert.ok(
+    (await view(checkoutRun.id)).steps.some((s) => s.key === 'edit/review' && s.conversationId),
+    'judge conversation is inspectable'
+  );
   const budget = await launch(
     plan(`costly:{by:'${who}',brief:'TAG:costly',usd:4}`, `return await s.costly.try() as never;`)
   );
@@ -250,4 +269,19 @@ test('real backend: fan-out, restart adoption, checkout judges, question, rewrit
     'budget refused'
   );
   assert.equal(count('costly'), 0);
+  // Two different harnesses still share a named resource; reserving dollars does not acquire it.
+  const resources = await launch(
+    plan(
+      `a:{by:'${who}',needs:['cpu'],brief:'TAG:resource'},b:{by:'codex:gpt-6.1-sol:low',needs:['cpu'],brief:'TAG:blocked'}`,
+      `const [a]=await Promise.all([s.a(),s.b()]);return a;`
+    )
+  );
+  await eventually(
+    async () => count('resource') === 1 && (await view(resources.id)).steps.length === 2,
+    'resource held'
+  );
+  assert.equal(count('blocked'), 0, 'second harness waits for the shared resource');
+  fs.writeFileSync(path.join(fake, 'resource.go'), '');
+  await eventually(async () => (await view(resources.id)).status === 'met', 'resource released');
+  assert.equal(count('blocked'), 1);
 });

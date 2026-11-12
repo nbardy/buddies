@@ -48,7 +48,7 @@ async function handle(deps: ToolDeps, grant: BuddyGrant, action: Action): Promis
       if (
         !(workspace.folders ?? [workspace.rootPath]).some((root) => {
           const rel = path.relative(fs.realpathSync(root), file);
-          return !rel.startsWith('..') && !path.isAbsolute(rel);
+          return rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
         })
       )
         throw new Error('Plan outside workspace');

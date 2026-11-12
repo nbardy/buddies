@@ -136,7 +136,7 @@ const app = express();
 const server = http.createServer(app);
 const APP_DATA_DIR = appDataDirectory();
 // Whether this backend may start agents (copied-store guard): decided once, read by the Buddy
-// runner, the expedition host and the keyed expeditions' mode.
+// runner and the expedition loop.
 const EXECUTION_GATE = decideExecutionGate();
 // Every provider execution is journaled here so the next backend can adopt it (turns/executions.ts).
 const executionJournals = createExecutionJournals(path.join(APP_DATA_DIR, 'executions'));
@@ -879,7 +879,7 @@ shutdownController = registerShutdownHandlers(
       upstream.stop();
       dependencyChecks.close();
       await Promise.all([turnAttemptJournal.flush(), errorJournal.flush(), flushRouteLatency()]);
-      // Detaches every keyed kernel (kills its plan process) and kills command process groups;
+      // Kills each plan process;
       // Buddy turns go on and are adopted by the next backend.
       await expeditions.close();
       await buddyMcp?.close();

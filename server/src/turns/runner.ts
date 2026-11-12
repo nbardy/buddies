@@ -839,9 +839,9 @@ export class TurnRunner {
       .join('');
     // Run 3 (2026-11-11): an expedition call's typed answer was joined to Codex's progress text and
     // failed to parse. `final` is the harness's last message alone; `text` stays every bit of the
-    // turn's prose, which is what ordinary Buddy answers have always posted. Only an expedition
-    // call reads `final` (buddies/runner.ts requestEnding). Guard: conversation-runtime completion
-    // tests; expeditions-v1-agent-runs.
+    // turn's prose, which is what ordinary Buddy answers have always posted. runTurn consumes
+    // `final`. Guard: conversation-runtime completion
+    // tests; run-turn.
     return { t: 'complete', text, final: fold.finalText ?? text };
   }
 

@@ -1,3 +1,4 @@
+import process from 'node:process';
 import type { ExpeditionRef, ExpeditionResult } from '@unleashd/shared';
 import { z } from 'zod';
 import { zodToJsonSchema as convert } from 'zod-to-json-schema';
@@ -12,25 +13,7 @@ export type Result<T> =
   | Exclude<ExpeditionResult, { out: unknown }>
   | { t: 'passed'; out: T; ref: ExpeditionRef }
   | { t: 'failed'; out: T; ref: ExpeditionRef; why: string };
-type Text<I> = string | ((item: I) => string);
-type Judge<I> = { check: Text<I> } | { review: string; by: string };
-type Definition<I = never> = {
-  item?: z.ZodTypeAny;
-  returns?: z.ZodTypeAny;
-  minutes?: number;
-  needs?: readonly string[];
-} & (
-  | {
-      by: string;
-      brief: Text<I>;
-      reads?: string | readonly string[];
-      web?: boolean;
-      checkout?: boolean;
-      judge?: Judge<I>;
-      usd?: number;
-    }
-  | { run: Text<I> }
-);
+type Definition<I = never> = z.input<ReturnType<typeof definition<I>>>;
 type ItemDefinition<I extends z.ZodType<{ id: string }>, O extends z.ZodTypeAny> = (Definition<
   z.output<I>
 > extends infer D
@@ -65,7 +48,7 @@ export type Call = {
   usd: number;
   minutes: number;
   needs: string[];
-  inputs: Options;
+  inputs: Options & { item?: unknown };
   output: object | null;
 } & (
   | {
@@ -83,10 +66,11 @@ export type Call = {
 export type Message =
   | { t: 'contract'; contract: ContractInput; defaults: string[] }
   | { t: 'call'; seq: number; call: Call }
-  | { t: 'waiting' }
+  | { t: 'waiting'; on: number[] }
   | { t: 'end'; result: Held<unknown> }
   | { t: 'error'; why: string };
-const text = z.union([z.string().min(1), z.function()]);
+const text = <I>() =>
+  z.union([z.string().min(1), z.custom<(item: I) => string>((v) => typeof v === 'function')]);
 const schema = z.custom<z.ZodTypeAny>((v) => v instanceof z.ZodType);
 const common = {
   item: schema.optional(),
@@ -94,26 +78,27 @@ const common = {
   minutes: z.number().positive().optional(),
   needs: z.array(z.string()).optional(),
 };
-const definition = z.union([
-  z
-    .object({
-      ...common,
-      by: z.string(),
-      brief: text,
-      reads: z.union([z.string(), z.array(z.string())]).optional(),
-      web: z.boolean().optional(),
-      checkout: z.boolean().optional(),
-      usd: z.number().positive().optional(),
-      judge: z
-        .union([
-          z.object({ check: text }).strict(),
-          z.object({ review: z.string(), by: z.string() }).strict(),
-        ])
-        .optional(),
-    })
-    .strict(),
-  z.object({ ...common, run: text }).strict(),
-]);
+const definition = <I>() =>
+  z.union([
+    z
+      .object({
+        ...common,
+        by: z.string(),
+        brief: text<I>(),
+        reads: z.union([z.string(), z.array(z.string())]).optional(),
+        web: z.boolean().optional(),
+        checkout: z.boolean().optional(),
+        usd: z.number().positive().optional(),
+        judge: z
+          .union([
+            z.object({ check: text<I>() }).strict(),
+            z.object({ review: z.string(), by: z.string() }).strict(),
+          ])
+          .optional(),
+      })
+      .strict(),
+    z.object({ ...common, run: text<I>() }).strict(),
+  ]);
 const render = (value: unknown, item: unknown): string =>
   z
     .string()
@@ -160,7 +145,7 @@ export function expedition<const S extends Record<string, Definition>>(config: {
       });
       process.on('disconnect', () => process.exit(0));
       process.on('beforeExit', () => {
-        send({ t: 'waiting' });
+        send({ t: 'waiting', on: [...pending.keys()] });
         process.channel!.ref();
       });
       const resolve = (name: string) => {
@@ -171,7 +156,7 @@ export function expedition<const S extends Record<string, Definition>>(config: {
       };
       const defaults: string[] = [];
       const compiled = Object.entries(config.steps).map(([name, raw]) => {
-        const d = definition.parse(raw);
+        const d = definition<unknown>().parse(raw);
         const agent = 'by' in d ? config.agents?.[d.by] : undefined;
         const cap = (field: 'usd' | 'minutes', fallback: number) => {
           const value =
@@ -189,6 +174,8 @@ export function expedition<const S extends Record<string, Definition>>(config: {
             ? { ...d.judge, by: resolve(d.judge.by) }
             : undefined;
         const by = 'by' in d ? resolve(d.by) : '';
+        if (d.needs?.some((key) => ['claude', 'codex', 'gemini', 'cursor', 'muse'].includes(key)))
+          throw new Error('needs names resources; agent harness slots are acquired automatically');
         const attempt = async (first?: unknown, second?: Options): Promise<ExpeditionResult> => {
           const item: unknown = d.item?.parse(first);
           if (d.item) z.object({ id: z.string() }).parse(item);
@@ -208,7 +195,7 @@ export function expedition<const S extends Record<string, Definition>>(config: {
             usd,
             minutes,
             needs: d.needs ?? [],
-            inputs: input,
+            inputs: { ...input, ...(d.item ? { item } : {}) },
             output: d.returns ? jsonSchema(d.returns) : 'by' in d ? jsonSchema(report) : null,
           };
           const c: Call =

@@ -94,6 +94,7 @@ export type Receipt = {
   conversationId?: string;
   commit?: string;
   why?: string;
+  review?: Receipt & { who: string };
 };
 export async function execute(
   d: CallDeps,
@@ -112,7 +113,8 @@ export async function execute(
   const tree = path.join(own, at.token),
     temp = path.join(own, 'tmp'),
     branch = `expedition/${at.token}`;
-  const base = c.inputs.on?.ref.commit ?? at.base;
+  const candidate = c.inputs.on ?? c.inputs.continues;
+  const base = candidate?.ref.commit ?? at.base;
   const ref: ExpeditionRef = { id: at.token, base, commit: base };
   const checkout = async (write: boolean) => {
     if (!fs.existsSync(path.join(tree, '.git'))) {
@@ -139,7 +141,8 @@ export async function execute(
     caps: TurnCapabilities,
     cwd: string,
     usd: number,
-    inputs: unknown
+    inputs: unknown,
+    minutes = c.minutes
   ): Promise<Receipt> => {
     if (at.signal.aborted) return { cost: 0, result: { t: 'cancelled', partial: ref } };
     const model = await d.resolve(by);
@@ -148,8 +151,11 @@ export async function execute(
       key,
       ...model,
       cwd,
+      // Forward the grants too: a prompt alone left the first real run on chat permissions.
+      // Guard: expedition-backend rejects bypass argv for every expedition turn.
+      capabilities: caps,
       prompt: prompt(brief, inputs, caps, schema, model.provider),
-      maxRuntimeMs: Math.ceil(c.minutes * 60000),
+      maxRuntimeMs: Math.ceil(minutes * 60000),
       title: `Expedition ${c.key}`,
     };
     const o = await d.runTurn(request);
@@ -178,7 +184,13 @@ export async function execute(
         result: { t: 'errored', why: `${error}; ${o.text.slice(0, 160)}` },
       };
     }
-    return { cost, conversationId: o.conversationId, result: { t: 'passed', out, ref } };
+    const decision = schema === verdict ? (out as { verdict: string; why: string }) : undefined;
+    return {
+      cost,
+      conversationId: o.conversationId,
+      why: decision?.why,
+      result: { t: decision?.verdict === 'no' ? 'failed' : 'passed', why: decision?.why, out, ref },
+    };
   };
   const cancel = () => {
     for (const key of turns) void d.cancelTurn(key);
@@ -198,8 +210,21 @@ export async function execute(
       }
       case 'agent': {
         if (c.checkout) await checkout(true);
+        // Done reviews read the candidate's exact tree too, rather than only its answer.
+        // Guard: expedition-backend reads the source and diff for a done review.
+        const pinned = !c.checkout && candidate?.ref.commit;
+        if (pinned) {
+          await checkout(false);
+          fs.writeFileSync(
+            path.join(own, 'changes.diff'),
+            await git(at.repo, ['diff', at.base, base])
+          );
+        }
         const cwd = c.checkout ? tree : own;
-        const reads = c.reads.map((p) => path.resolve(at.repo, p));
+        const reads = [
+          ...c.reads.map((p) => path.resolve(at.repo, p)),
+          ...(pinned ? [tree, own] : []),
+        ];
         const caps = capabilitiesOf(
           c.checkout
             ? { t: 'checkout', tree, temp, reads, web: c.web, git: await worktreeGit(tree, branch) }
@@ -208,7 +233,7 @@ export async function execute(
         const r = await run(
           at.token,
           c.by,
-          `${at.contract.rules.join('\n')}\n${c.brief}\n${c.checkout ? `Starting commit ${base}. Commit your changes.` : ''}`,
+          `${at.contract.rules.join('\n')}\n${c.brief}\n${c.checkout ? `Starting commit ${base}. Commit your changes.` : ''}${pinned ? `\nTHE CODE: exact commit ${base} at ${tree}; diff ${path.join(own, 'changes.diff')}. Open both.` : ''}`,
           c.output!,
           caps,
           cwd,
@@ -216,7 +241,7 @@ export async function execute(
           c.inputs
         );
         if (c.checkout) ref.commit = await git(tree, ['rev-parse', 'HEAD']);
-        if (r.result.t !== 'passed') return r;
+        if (r.result.t !== 'passed') return { ...r, commit: ref.commit };
         if (typeof r.result.out === 'object' && r.result.out && 'files' in r.result.out) {
           for (const file of (r.result.out as { files: string[] }).files) {
             const rel = path.relative(
@@ -225,14 +250,14 @@ export async function execute(
             );
             if (
               path.isAbsolute(file) ||
-              rel.startsWith('..') ||
+              rel === '..' ||
+              rel.startsWith(`..${path.sep}`) ||
               !fs.statSync(path.join(cwd, file)).isFile()
             )
               throw new Error(`Answer file outside turn: ${file}`);
           }
         }
-        let why: string | undefined,
-          judgeCost = 0;
+        let why: string | undefined, reviewReceipt: Receipt['review'];
         if (c.judge && 'check' in c.judge) {
           const checkTree = path.join(own, 'check');
           await git(at.repo, ['worktree', 'add', '--detach', checkTree, ref.commit!]);
@@ -262,21 +287,19 @@ export async function execute(
               capabilitiesOf({ t: 'read', reads: [reviewTree, own], web: false }),
               own,
               max.usd,
-              r.result
+              r.result,
+              max.minutes
             );
-            judgeCost = review.cost;
             if (review.result.t !== 'passed') why = JSON.stringify(review.result);
-            else {
-              const v = review.result.out as { verdict: string; why: string };
-              if (v.verdict !== 'yes') why = v.why;
-            }
+            reviewReceipt = { ...review, who: j.by };
           } finally {
             await git(at.repo, ['worktree', 'remove', '--force', reviewTree]);
           }
         }
         return {
           ...r,
-          cost: r.cost + judgeCost,
+          cost: r.cost + (reviewReceipt?.cost ?? 0),
+          review: reviewReceipt,
           commit: ref.commit,
           result: { ...r.result, ref, t: why ? 'failed' : 'passed', why },
         };

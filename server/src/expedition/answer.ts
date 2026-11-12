@@ -12,7 +12,7 @@ export function answerValue(body: string): unknown {
   } catch {
     // Run 3's Codex final was valid bare JSON after prose. Scan complete top-level values,
     // skipping whole containers/strings so nested values cannot become accidental answers.
-    // Guard: expeditions-v1-executor, exact run-3 answer shapes and truncated containers.
+    // Guard: expedition-small, exact run-3 answer shapes and truncated containers.
     let found: { value: unknown } | undefined;
     for (let i = 0; i < body.length; i++) {
       const start = i;

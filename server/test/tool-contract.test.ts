@@ -168,6 +168,7 @@ test('tool input schemas change only additively; reshaped forms need a legacy ca
 // calls) because `propose` has no other teacher: a Buddy reads no docs outside the unleashd checkout.
 // Gating the tool to Buddies that may propose would win it back.
 // 2026-11-11: cut-over removes draft/act after all four records were stopped and retired.
+// 2026-11-12: one-file expedition surface replaces keyed folders; the manager is a normal Buddy.
 // Snapshot regenerated with UPDATE_TOOL_SNAPSHOT=1; the additive guard remains unchanged.
 const WORKER_DESCRIPTION_BUDGET = 4512;
 

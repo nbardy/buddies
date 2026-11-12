@@ -78,6 +78,7 @@ export async function gates(
   let contract: Contract | undefined;
   const calls: Call[] = [],
     defaults: string[] = [];
+  const unanswered = new Set<number>();
   await new Promise<void>((resolve, reject) => {
     const child = runPlan(file, (m, reply) => {
       try {
@@ -89,11 +90,19 @@ export async function gates(
           case 'call': {
             const result = known(m.call);
             if (result) reply(result);
-            else calls.push(m.call);
+            else {
+              calls.push(m.call);
+              unanswered.add(m.seq);
+            }
             break;
           }
           case 'waiting':
-            if (calls.length) {
+            if (m.on.every((seq) => unanswered.has(seq))) {
+              if (!m.on.length) {
+                void child.kill();
+                reject(new Error('Plan waits without a host call'));
+                break;
+              }
               void child.kill().then(resolve);
             }
             break;
@@ -111,9 +120,15 @@ export async function gates(
     });
   });
   if (!contract) throw new Error('The plan supplied no contract');
+  const reviewUsd = (contract.doneReview ?? defaultCap(contract)).usd;
   const preview: ExpeditionProposal['preview'] = {
     ...contract,
-    costUsd: calls.reduce((sum, c) => sum + c.usd, 0),
+    // Include the judge reservation: the first real card showed $0.15 for a $0.25 wave.
+    // Guard: expedition-small preview includes review caps.
+    costUsd: calls.reduce(
+      (sum, c) => sum + c.usd + (c.t === 'agent' && c.judge && 'review' in c.judge ? reviewUsd : 0),
+      0
+    ),
     firstWave: calls.map((c) => ({ key: c.key, who: c.t === 'agent' ? c.by : c.t, usd: c.usd })),
     defaults: [
       ...defaults,

@@ -26,7 +26,12 @@
   overflow-wrap: anywhere;
 }
 .expedition-question {
-  border-color: var(--accent-color);
+  border-color: var(--accent-primary);
+}
+.expedition-step > .ui-row {
+  gap: var(--sp-2);
+  justify-content: space-between;
+  flex-wrap: wrap;
 }
 .expedition-commit {
   white-space: pre-wrap;

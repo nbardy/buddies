@@ -70,17 +70,18 @@ function Question({
 }
 export function ExpeditionContent({ view, refresh }: { view: View; refresh(): Promise<void> }) {
   const ids = useAtomValue(listField('idSet'));
+  const [title, ...body] = view.goal.split('\n');
   return (
     <article className="expedition ui-stack">
       <header className="ui-stack">
         <span className="ui-muted">Expedition · {view.status}</span>
-        <h2>{view.goal.split('\n')[0]}</h2>
+        <h2>{title}</h2>
         <p className="expedition-budget">
           ${view.spend.toFixed(4)} spent · ${view.reserved.toFixed(2)} reserved · $
           {view.budget.usd.toFixed(2)} budget · {view.budget.hours} hours
         </p>
       </header>
-      <p className="expedition-goal">{view.goal}</p>
+      {body.length > 0 && <p className="expedition-goal">{body.join('\n')}</p>}
       {view.reason && <p>{view.reason}</p>}
       {view.questions.map((q) => (
         <Question key={q.key} id={view.id} question={q} refresh={refresh} />

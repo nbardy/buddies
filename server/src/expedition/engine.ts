@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ExpeditionQuestion, ExpeditionView } from '@unleashd/shared';
 import type { ExecutionGate } from '../buddies/execution-gate';
-import type { RunTurnOutcome } from '../turns/run-turn';
 import type { Call } from './author';
 import { type CallDeps, type Receipt, execute } from './call';
 import { git } from './cambium';
@@ -38,7 +37,27 @@ export function createExpeditions(
   }
 ) {
   const runs = new Map<string, Run>();
-  const slots = new Map<string, Set<Promise<RunTurnOutcome>>>();
+  const slots = new Map<string, Set<Promise<unknown>>>();
+  async function admitted<T>(
+    keys: string[],
+    contract: Contract,
+    run: () => Promise<T>
+  ): Promise<T> {
+    const pools = [...new Set(keys)].map((key) => {
+      const pool = slots.get(key) ?? new Set<Promise<unknown>>();
+      slots.set(key, pool);
+      return { pool, limit: contract.pools[key] ?? 1 };
+    });
+    while (pools.some(({ pool, limit }) => pool.size >= limit))
+      await Promise.race(pools.flatMap(({ pool }) => [...pool].map((p) => p.catch(() => {}))));
+    const work = Promise.resolve().then(run);
+    for (const { pool } of pools) pool.add(work);
+    try {
+      return await work;
+    } finally {
+      for (const { pool } of pools) pool.delete(work);
+    }
+  }
   const capOf = (c: Call, contract: Contract) =>
     c.usd +
     (c.t === 'agent' && c.judge && 'review' in c.judge
@@ -107,7 +126,7 @@ export function createExpeditions(
       versions: r.log.flatMap((e) => (e.t === 'plan' ? [e.version] : [])),
       reason: latest?.reason,
       steps: r.log.flatMap((e) => {
-        if (e.t !== 'start') return [];
+        if (e.t !== 'start' || e.call.t === 'question') return [];
         const result = r.log.find(
           (x) => x.t === 'result' && x.key === e.call.key && x.hash === e.hash
         ) as Extract<Entry, { t: 'result' }> | undefined;
@@ -118,12 +137,26 @@ export function createExpeditions(
             hash: e.hash,
             who: e.call.t === 'agent' ? e.call.by : e.call.t,
             state: receipt?.result.t ?? 'running',
-            cost: receipt?.cost ?? 0,
+            cost: (receipt?.cost ?? 0) - (receipt?.review?.cost ?? 0),
             conversationId: receipt?.conversationId,
             commit: receipt?.commit,
             why:
               receipt?.why ?? (receipt && 'why' in receipt.result ? receipt.result.why : undefined),
           },
+          ...(receipt?.review
+            ? [
+                {
+                  key: `${e.call.key}/review`,
+                  hash: e.hash,
+                  who: receipt.review.who,
+                  state: receipt.review.result.t,
+                  cost: receipt.review.cost,
+                  why: receipt.review.why,
+                  conversationId: receipt.review.conversationId,
+                  commit: receipt.commit,
+                },
+              ]
+            : []),
         ];
       }),
     };
@@ -187,31 +220,19 @@ export function createExpeditions(
       const launch = launchOf(r);
       if (Date.now() > launch.at + launch.contract.budget.hours * 3600000)
         return { cost: 0, result: { t: 'refused', reason: 'deadline' } };
-      return execute(
-        {
-          ...d,
-          runTurn: async (request) => {
-            const pool = slots.get(request.provider) ?? new Set<Promise<RunTurnOutcome>>();
-            slots.set(request.provider, pool);
-            while (pool.size >= (launch.contract.pools[request.provider] ?? 1))
-              await Promise.race(pool);
-            if (abort.signal.aborted) throw new Error('Cancelled before turn admission');
-            const running = d.runTurn(request);
-            pool.add(running);
-            try {
-              return await running;
-            } finally {
-              pool.delete(running);
-            }
+      return admitted(call.needs, launch.contract, () =>
+        execute(
+          {
+            ...d,
+            runTurn: (request) =>
+              admitted([request.provider], launch.contract, () => {
+                if (abort.signal.aborted) throw new Error('Cancelled before turn admission');
+                return d.runTurn(request);
+              }),
           },
-        },
-        call,
-        {
-          ...launch,
-          token,
-          folder: r.folder,
-          signal: abort.signal,
-        }
+          call,
+          { ...launch, token, folder: r.folder, signal: abort.signal }
+        )
       );
     };
     const done = work()
@@ -253,13 +274,20 @@ export function createExpeditions(
     const c = launchOf(r).contract;
     for (const [i, done] of c.done.entries()) {
       if ('owner' in done) {
-        if (!(await question(r, `done/${i}`, done.owner, 'confirm')))
+        if (
+          !(await question(
+            r,
+            `done/${i}/${hash(result)}`,
+            `${done.owner}\nCandidate: ${JSON.stringify(result)}`,
+            'confirm'
+          ))
+        )
           return hold(r, `Owner declined: ${done.owner}`);
       } else {
         const call: Call = {
           key: `done/${i}`,
           usd: 0,
-          minutes: c.doneReview?.minutes ?? 5,
+          minutes: (c.doneReview ?? defaultCap(c)).minutes,
           needs: [],
           inputs: { on: result as never, reads: [result as never] },
           output: null,
@@ -273,7 +301,7 @@ export function createExpeditions(
                 checkout: false,
                 web: false,
                 output: (await import('./call')).verdict,
-                usd: c.doneReview?.usd ?? 0.3,
+                usd: (c.doneReview ?? defaultCap(c)).usd,
               } as const)),
         };
         const receipt = await step(r, call);
@@ -335,6 +363,7 @@ export function createExpeditions(
       allowed();
       const r = get(id),
         q = view(id).questions.find((q) => q.key === key);
+      if (['met', 'stopped'].includes(status(r))) throw new Error('Expedition is finished');
       if (
         !q ||
         q.kind === 'manager' ||
@@ -349,14 +378,25 @@ export function createExpeditions(
     async act(id: string, buddyId: string, action: 'continue' | 'stop' | 'rewrite', why: string) {
       allowed();
       const r = get(id);
-      const previous = status(r);
       if (launchOf(r).contract.leader !== `buddy:${buddyId}`)
         throw new Error('Only the manager may act');
       if (['met', 'stopped'].includes(status(r))) throw new Error('Expedition is finished');
       if (action === 'rewrite') {
         const file = path.join(r.folder, 'plan.expedition.ts'),
           source = fs.readFileSync(file, 'utf8');
-        const checked = await gates(file, (c) => known(r, c));
+        const open = new Set(
+          view(id)
+            .questions.filter((q) => q.kind === 'manager')
+            .map((q) => q.key)
+        );
+        const checked = await gates(
+          file,
+          (c) =>
+            known(r, c) ??
+            (c.t === 'question' && c.kind === 'manager' && open.has(c.key)
+              ? { t: 'passed', out: why, ref: { id: hash(c) } }
+              : undefined)
+        );
         if (hash(checked.contract) !== hash(launchOf(r).contract))
           return { issues: ['The owner contract changed'] };
         if (fs.readFileSync(file, 'utf8') !== source)
@@ -379,6 +419,9 @@ export function createExpeditions(
         fs.writeFileSync(path.join(r.folder, 'plans', `v${version}.expedition.ts`), source);
         append(r, { t: 'plan', version, hash: hash(source) });
       }
+      // Continuing also replays once; keeping the old child could run two plan loops.
+      // Guard: expedition-backend manager actions reuse finished keys.
+      await r.child?.kill();
       for (const q of view(id).questions.filter((q) => q.kind === 'manager')) {
         append(r, { t: 'answer', key: q.key, value: why });
         r.waiters.get(q.key)?.(why);
@@ -390,7 +433,7 @@ export function createExpeditions(
         append(r, { t: 'status', status: 'stopped', reason: why });
       } else {
         append(r, { t: 'status', status: 'running', reason: why });
-        if (action === 'rewrite' || (previous === 'held' && !r.waiters.size)) evaluate(r);
+        evaluate(r);
       }
       return view(id);
     },

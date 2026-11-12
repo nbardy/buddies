@@ -64,7 +64,7 @@ const relative = (file) => path.relative(repositoryRoot, file);
  * also runs): a test-only type error must fail typecheck, never the build.
  */
 export const PROJECTS = [
-  // shared also builds with tsc first; checking it here puts its source (the keyed expedition
+  // shared also builds with tsc first; checking it here puts its source (the expedition
   // types every package imports) under the tsrs/tsc cross-check too.
   { config: at('shared', 'tsconfig.json'), extra: ['--noEmit'] },
   { config: at('server', 'tsconfig.test.json'), extra: [] },

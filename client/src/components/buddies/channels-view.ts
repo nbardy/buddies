@@ -10,9 +10,9 @@
  * from its channel.
  *
  *   D = Home (channel list + Buddies) ⊕ Landing (the workspace Home) ⊕ Threads ⊕ Channel ⊕ Thread ⊕ Task ⊕ DM ⊕ Workers
- *       ⊕ Keyed expedition
+ *       ⊕ Expedition
  *
- * `keyed` (`?expedition=`) opens the Timeline of ExpeditionView.tsx.
+ * `expedition` (`?expedition=`) opens the view of ExpeditionView.tsx.
  *
  * `dm` is a Buddy DM conversation drawn as a thread (493c1c7). It wins over the other params,
  * which stay in the URL so Back (dropping `dm`) returns to the screen the DM was opened from.
@@ -35,8 +35,8 @@ export function channelsView(search: string): ChannelsView {
   const taskId = params.get('task');
   const workers = params.get('workers');
   if (workers) return { kind: 'workers', buddyId: workers };
-  const keyed = params.get('expedition');
-  if (keyed) return { kind: 'expedition', id: keyed };
+  const expedition = params.get('expedition');
+  if (expedition) return { kind: 'expedition', id: expedition };
   const dm = params.get('dm');
   if (dm) return { kind: 'dm', conversationId: dm };
   if (params.get('view') === 'home') return { kind: 'landing' };
