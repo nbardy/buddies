@@ -8,7 +8,7 @@
 // Now: (1) skip when a content hash of every build input matches the stamp, (2) otherwise build
 // in a CHILD process (NODE_ENV cannot leak), concurrently with the backend and Vite, into a
 // staging directory that atomically replaces dist, so the old bundle keeps serving until the new
-// one is complete. Guard: tools/client-build.test.mjs.
+// one is complete. Guard: tools/dev-supervisor.test.mjs.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {

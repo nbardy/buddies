@@ -15,7 +15,7 @@
 //
 // History (2026-10-06 → 10-08): the composer kept `@Label` text plus hidden picked snapshots, and the
 // server resolved names on the Buddy path only, so a pasted `@Name` highlighted and mentioned nobody.
-// Guards: client/test/composer-draft.test.ts, server/test/owner-mentions.test.ts.
+// Guards: client/test/composer-draft.test.ts, client/test/body-references.test.ts.
 
 /** Who a name can address: a Buddy or a Task. The server's roster holds Buddies only. */
 export type NamedRef = { kind: 'buddy' | 'task'; id: string; name: string };

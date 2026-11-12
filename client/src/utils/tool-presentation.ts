@@ -62,23 +62,6 @@ function argSummaryOf(name: string, record: Record<string, unknown>): string {
   return '';
 }
 
-/**
- * Codex emits two shell tool_use events:
- * - start: command string (keep)
- * - completion: exit_code only/no displayText (suppress duplicate line)
- */
-export function isCompletionOnlyToolUse(
-  name: string,
-  input?: unknown,
-  displayText?: string
-): boolean {
-  if (name !== 'shell') return false;
-  if (typeof displayText === 'string' && displayText.trim().length > 0) return false;
-  const record = asRecord(input);
-  if (!record) return false;
-  return typeof record.exit_code === 'number';
-}
-
 export function formatToolUse(name: string, input?: unknown, displayText?: string): string {
   const emoji = TOOL_EMOJI.get(name) ?? '🔧';
   const record = asRecord(input);

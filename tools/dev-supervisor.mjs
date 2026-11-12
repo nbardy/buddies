@@ -351,7 +351,7 @@ async function runServices(services, boot, recordBackend = () => {}) {
     if (services.includes('client-build')) {
       // Concurrent with everything below, never awaited: the backend serves whatever dist exists
       // (the old one stays until the new one is complete). It needs no compiler output: vite
-      // aliases @unleashd/shared to its source. Guard: tools/client-build.test.mjs.
+      // aliases @unleashd/shared to its source. Guard: tools/dev-supervisor.test.mjs.
       const startedAt = performance.now();
       void ensureClientBuild({
         repositoryRoot,

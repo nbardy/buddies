@@ -2,8 +2,7 @@
  * Runtimes built from durable records, never from transcripts (T13b S2): at boot only the records
  * that NEED a live runtime become one (`needsRuntime`); every other listed conversation, app-created
  * or discovered, becomes one on first use through `materialize`. Before, a conversation outside the
- * loader's 500-row window 404'd on open. Guards: server/test/ingest-history.test.ts and
- * server/test/lazy-recovery.test.ts.
+ * loader's 500-row window 404'd on open. Guard: server/test/ingest-history.test.ts.
  */
 
 import type { SubAgent as NativeSubAgent, RecordSummary, SessionRow } from '@unleashd/ingest';

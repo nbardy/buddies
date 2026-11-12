@@ -5,8 +5,7 @@
 // post writer (the Buddy MCP `post`, the owner post route, the owner's answer) now stores the body
 // that `resolveReferences` (shared/src/body-references.ts, the same code the owner composer shows
 // its highlight from) returns for the channel's workspace roster, so the wake and the chip come
-// from the one token form. Guards: `plain @Name mentions` in server/test/buddies-v2.test.ts,
-// server/test/owner-mentions.test.ts.
+// from the one token form. Guard: `plain @Name mentions` in server/test/buddies-v2.test.ts.
 
 import type { Actor, BuddiesCore, Buddy, Channel, Mention, PostKind } from '@unleashd/buddies-core';
 import { type Resolution, mentionedIds, resolveReferences } from '@unleashd/shared';

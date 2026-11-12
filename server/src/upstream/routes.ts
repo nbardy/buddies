@@ -195,5 +195,3 @@ export function createUpstreamService(dependencies: UpstreamServiceDependencies)
     },
   };
 }
-
-export type UpstreamService = ReturnType<typeof createUpstreamService>;

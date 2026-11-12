@@ -6,11 +6,11 @@
  *   - No "*" in pattern  → prefix match (startsWith)
  *   - Contains "*"       → glob match (anchored ^...$, "*" → ".*")
  *
- * Patterns are matched against ParsedSession.workingDirectory in loader.ts so
- * ignored sessions never enter the in-memory conversations Map.
+ * Patterns are matched against a discovered session's working directory in server.ts so
+ * ignored sessions never become conversations.
  *
- * server.ts calls setIgnorePatterns() once settings are loaded; the loader
- * reads the compiled set via shouldIgnoreWorkingDirectory().
+ * server.ts calls setIgnorePatterns() once settings are loaded and reads the compiled set via
+ * shouldIgnoreWorkingDirectory().
  */
 
 interface CompiledIgnore {

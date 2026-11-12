@@ -10,7 +10,7 @@ FAIL=0
 
 echo "==> Gate G1: jotaiStore.set outside client/src/atoms/ — components call actions, never write atoms"
 # Allowlist: only files under client/src/atoms/ may call jotaiStore.set
-# mutate.ts wraps jotaiStore.set inside atoms/ — allowed; everything outside must be zero.
+# Everything outside atoms/ must be zero.
 if grep -R --include="*.ts" --include="*.tsx" -n "jotaiStore\.set" client/src 2>/dev/null | grep -v "client/src/atoms/" | grep -v "node_modules" ; then
   echo "G1 FAIL: jotaiStore.set found outside client/src/atoms/. Components must call actions, never write atoms directly."
   echo "  Fix: move the write into an action in client/src/atoms/actions.ts (or another module in client/src/atoms/)."
@@ -22,8 +22,7 @@ echo
 
 echo "==> Gate G2: raw .buddyContext / .purpose reads in client/src/mobile/ — use the row kind"
 # All mobile code must read identity from the row's `kind` via matchConversationKind
-# (shared/src/conversation-config.ts), never raw field access. One-allowed consumer is components/buddies/buddies-shaping.ts
-# which is outside mobile/. Zero hits expected in mobile/.
+# (shared/src/conversation-config.ts), never raw field access. Zero hits expected in mobile/.
 # Exclude parsed.*.purpose from buddy-review-message parser (pure helper, not Conversation.purpose).
 if grep -R --include="*.ts" --include="*.tsx" -n "\.buddyContext\|\.purpose" client/src/mobile 2>/dev/null | grep -v "parsed\.purpose" | grep -v "parsed\.subjectBuddyId" | grep -v "No raw \.buddyContext" ; then
   echo "G2 FAIL: raw .buddyContext or .purpose read in client/src/mobile/. Read row.kind / matchConversationKind()."

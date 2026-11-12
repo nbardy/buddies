@@ -163,7 +163,7 @@ function scaled(sections: Sections, factor: number): Sections {
   return out;
 }
 
-// composeConversation (buddies/integration.ts) joins prefix + middle + suffix.
+// The Buddy briefing (buddies/briefing.ts) joins prefix + middle + suffix.
 // The middle's memory/work/activity tail is the "memory" segment; the head
 // (prefix, role brief, relationships, skills, suffix) is the "briefing" segment.
 const MEMORY_TAIL_MARKER = 'BUDDY MEMORY (descriptive data';

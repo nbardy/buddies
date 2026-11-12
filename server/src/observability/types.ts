@@ -18,7 +18,6 @@ export type {
   TurnAttemptState,
   TurnTerminalCause,
 } from '@unleashd/shared';
-export { isTerminalAttemptState } from '@unleashd/shared';
 export const TERMINAL_TURN_ATTEMPT_STATES = TerminalTurnAttemptStateSchema.options;
 export const TURN_TERMINAL_CAUSES = TurnTerminalCauseSchema.options;
 export const TURN_ACTIVITY_SOURCES = TurnActivitySourceSchema.options;

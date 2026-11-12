@@ -434,7 +434,7 @@ const ServerMessageSchema = z.discriminatedUnion('type', [
   ErrorMessageSchema,
   z.object({ type: z.literal('buddy_archived'), buddyId: z.string() }),
   // Debounced server change feed: some Buddy state was written; clients
-  // refresh their cached Buddy views (see server/src/buddies/change-feed.ts).
+  // refresh their cached Buddy views (see server.ts, `buddies_changed`).
   z.object({ type: z.literal('buddies_changed') }),
   // One channel's posts or responders changed; clients refresh only that
   // channel's views (client atoms/resources.ts invalidateChannelResources).
