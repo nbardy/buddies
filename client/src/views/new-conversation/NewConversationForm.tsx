@@ -95,13 +95,9 @@ export function NewConversationForm({
   const { autoFocus, quickPicks, ConfigSlot } = LAYOUT[layout];
   const resolvedDirectory = normalizeFolderDirectory(directory);
   const canCreate =
-    catalog !== null &&
-    connected &&
-    isDirectoryValid &&
-    !pending &&
-    directory.trim().length > 0;
+    catalog !== null && connected && isDirectoryValid && !pending && directory.trim().length > 0;
 
-  const create = async () => {
+  const create = () => {
     if (!canCreate) return;
     setPending(true);
     setError(null);
@@ -109,7 +105,7 @@ export function NewConversationForm({
     try {
       setLastWorkingDirectory(resolvedDirectory);
       onCreated(
-        await createConversation({
+        createConversation({
           workingDirectory: resolvedDirectory,
           config: pickedConfig ?? catalogDefault(catalog),
           kind: { t: 'chat' },
@@ -138,7 +134,7 @@ export function NewConversationForm({
         className="new-conversation__input"
         hasPendingDefault={hasPendingDefault}
         onClearDefault={() => setHasPendingDefault(false)}
-        onConfirm={() => void create()}
+        onConfirm={() => create()}
         onValidationChange={setIsDirectoryValid}
         autoFocus={autoFocus}
       />
@@ -195,7 +191,7 @@ export function NewConversationForm({
             type="button"
             className="new-conversation__action ui-control ui-row"
             data-primary="true"
-            onClick={() => void create()}
+            onClick={() => create()}
             disabled={!canCreate}
           >
             {pending ? 'Starting…' : 'Create'}

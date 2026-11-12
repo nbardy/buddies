@@ -386,7 +386,7 @@ export async function openSession({
     /**
      * Resolve [] once no HTTP request has been in flight for `quietMs`, or
      * the open URLs after `timeoutMs`. A fixed settle raced the app's second-wave
-     * loads (the usage panel, a swarm counter, a transcript that loads after
+     * loads (the usage panel, a transcript that loads after
      * its summary): one run caught the "Loading…" placeholder and the next did
      * not, which a compare reports as a regression. Polled fetches refire on an
      * interval, so a short quiet window is reachable between them.

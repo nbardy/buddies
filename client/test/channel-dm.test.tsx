@@ -429,13 +429,11 @@ test('a failed turn shows its system message in the DM rows', async () => {
   const { dmRows } = await import('../src/components/buddies/channel-dm');
   const { groupChatMessages } = await import('../src/utils/chat-message-groups');
   const rows = dmRows(
-    groupChatMessages(
-      [
-        message('user', 'hello', 1),
-        message('assistant', '', 1),
-        message('system', "Couldn't start codex: the `codex` command was not found.", 1),
-      ]
-    ),
+    groupChatMessages([
+      message('user', 'hello', 1),
+      message('assistant', '', 1),
+      message('system', "Couldn't start codex: the `codex` command was not found.", 1),
+    ]),
     []
   );
   const failures = rows.filter((row) => row.kind === 'failure');

@@ -157,7 +157,7 @@ export const WorkerRoleSchema = z.enum(['work', 'review', 'fix']);
 
 // The type is the records store's own (crates/unleashd-ingest `ConversationKind`, generated into
 // its index.d.ts): Rust stores and validates it, so TS no longer re-declares it (core review §3).
-// The quarantined swarm `worker` variant is classified once from the oompa tag; null ids mean an
+// The legacy `worker` variant (old oompa transcripts) is classified once from the oompa tag; null ids mean an
 // untagged `[oompa]`, a null role that the first message did not say.
 export type { ConversationKind };
 export type BuddyKind = Extract<ConversationKind, { t: 'buddy' }>;

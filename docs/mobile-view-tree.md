@@ -14,7 +14,7 @@ atoms/*, hooks/*, utils/*, shared/*, views/*, components/buddies/{api,types,ui-c
 
 **Shared views (owner decision O1, T20).** Device-agnostic content lives in `client/src/views/<group>/` and both trees render it: `views/conversation/` holds `SubAgentPanel`, `ResumeSource`, `QueuedMessages`, `TurnStatus`. `views/transcript/` holds `TranscriptGroup`, the one row view under both list containers (`'hover' | 'footer'` actions). `views/composer/` holds `PromptPalette` (`'popover' | 'sheet'`), `ComposerAttachments` (`'chips' | 'gallery'`) + `UploadErrorNotice`, and `SendControls` (`'labelled' | 'icons'`); the composers themselves (Chat.tsx input, `ComposerMobile` + `FullscreenComposer`) stay per tree. Where the output differs by device the view takes a named variant chosen by its caller (`presentation: 'tree' | 'cards'`, `'icon' | 'card'`, `'list' | 'disclosure'`, `'header' | 'composer'`), never a boolean and never `useDeviceKind`. A view never imports `mobile/*` or a desktop shell component (Sidebar, Gallery, SettingsMenu, ShellDesktop) — guard `client/test/views-boundary.test.ts`. Its CSS sits next to it with component-prefixed classes plus `ui/primitives.css` (`ui-section__*`, `ui-surface`, `ui-badge`, moved there from `mobile-ui.css`).
 
-Never import another `components/*.tsx` or its CSS. Swarm parsers were moved to `utils/swarmConvoParsers.ts` / `utils/swarmAnalyticsParsers.ts` precisely so mobile can reuse logic without pulling desktop view trees. `components/buddies/*` is the one allowed exception — its `buddies-shaping.ts` is pure shaping (no JSX/CSS side-effects) co-located with `api.ts`/`types.ts`/`ui-contract.ts`.
+Never import another `components/*.tsx` or its CSS. Shared logic lives in `utils/` so mobile can reuse it without pulling desktop view trees. `components/buddies/*` is the one allowed exception — its `buddies-shaping.ts` is pure shaping (no JSX/CSS side-effects) co-located with `api.ts`/`types.ts`/`ui-contract.ts`.
 
 Grep gates (run `pnpm check:client-invariants` / `bash tools/check-client-invariants.sh`):
 - **G1** — `jotaiStore.set` only inside `client/src/atoms/`. Components call actions.
@@ -55,16 +55,12 @@ Device-specific derived views that are not shared content still live in
 
 ### Creation actions (`views/new-conversation/`)
 
-`+ New` on Chats and Swarms opens `mobile/components/NewConversationSheet`, a
+`+ New` on Chats opens `mobile/components/NewConversationSheet`, a
 `<dialog>` around the SAME `NewConversationForm` the desktop Sidebar shows in
-its modal (`layout: 'modal' | 'sheet'`, T20-F). The form creates through
-`views/new-conversation/create.ts`:
+its modal (`layout: 'modal' | 'sheet'`, T20-F). The form creates a chat through
+the core `createConversation` action (there is no second creation spine; the
+old "New swarm" option was deleted 2026-11-12):
 
-- `CreateRequest` (`kind: 'chat' | 'swarm'`) → thin `createFromRequest`
-  dispatcher → one handler per kind. Both land on the core `createConversation`
-  action, so there is no second creation spine; `swarm` only adds the
-  `swarmDebugPrefix` from `GET /api/oompa-swarm-context`. That fetch failing
-  surfaces as an error in the form — never a silent downgrade to a plain chat.
 - `createBuddyViaBuilder()` (re-exported by `mobile/atoms/create.ts`) is a different shape (no directory, no config):
   `POST /api/buddies/builder` with a client-owned `conversationId`, then route
   to the returned Builder thread.
@@ -106,10 +102,6 @@ immer were removed in T19. See [client state](client-state.md).
 - **Single bridge:** only `App.tsx` `AppInner` mounts `useWebSocketBridge` (hoisted above `AppRoutes`). Never mount a second bridge in `mobile/` — it would double-connect and fight over `sendFnAtom`/`wsStatusAtom`.
 - **Never a second `handleMessage`:** the WS-push → `handleMessage` (`atoms/actions.ts`) dispatcher is the single shared spine. Mobile consumes it through the hoisted bridge; no mobile file defines its own handler.
 
-### Stale link note
-
-`client/src/views/conversation/SubAgentPanel.tsx` (then `components/SubAgentPanel.tsx:158`) previously linked to `/swarms/project` — dead link matching no `App.tsx` route. Retarget to `/workers/detail` or remove; do not copy the stale path into mobile.
-
 ---
 
 ### Channels: same URL, per-device mount
@@ -139,8 +131,7 @@ Shared with desktop rather than reimplemented:
 - `atoms/fork-actions.ts` — `forkConversation()` used by both `Chat.tsx` and the
   mobile header. Soft handoff: new conversation + `resumedFromConversationId` +
   transcript seeded into `draft:<new id>`.
-- `utils/conversation-transcript.ts` — transcript and fork-draft text, including
-  the swarm-debug-prefix strip that display does.
+- `utils/conversation-transcript.ts` — transcript and fork-draft text.
 - `utils/ids.ts` — `newId()`. `crypto.randomUUID` is secure-context-gated and is
   `undefined` over a plain-http LAN IP, which is exactly how phones reach the dev
   server. Gate G4 bans bare `crypto.randomUUID`.

@@ -30,7 +30,6 @@ Derived:
 | `unreadFamily(id)` | The NEW badge (`row.messageCount` past `seen[id]`). |
 | `childRowsFamily(id)` | Child-session rows for the sub-agent panel. |
 | `buddySidebarAtom` (`buddy-sidebar.ts`) | Buddy projects, groups, count and channel rows (roster ⨝ `buddyEntries`). |
-| `swarmWorkersByProjectAtom` (`swarm/swarm-workers.ts`) | Worker rows per project root, over `workersByProject`. Swarm code only. |
 
 ## Subscriptions
 
@@ -45,7 +44,7 @@ Derived:
 | Connected? load complete? default cwd? | `connectionAtom` (`loadCompleteOf`, `defaultCwdOf`) |
 | The active conversation | The route (`/chat/:id`); nothing persists it |
 | Persisted UI preference | `useAtomValue(prefsAtom).field` |
-| Any read-only server view (Buddy panels, swarm runs, catalog, git log) | `usePolledFetch` over the keyed cache in `atoms/resources.ts` |
+| Any read-only server view (Buddy panels, catalog, git log) | `usePolledFetch` over the keyed cache in `atoms/resources.ts` |
 | Buddy directory / detail | `useBuddyOverview`, `useBuddyDetail`, `useBuddyPage` in `hooks/useBuddyData.ts` — both shells |
 | A Buddy page's derived model + `talk` / open-project actions | `useBuddyPage` in `hooks/useBuddyData.ts` — the shells only render |
 
@@ -165,7 +164,7 @@ The one just written, a streaming reply and an in-flight load are pinned. Until
 ## Server resources: one keyed local store
 
 Conversations arrive over the WebSocket and live in `rowsAtom`. Every
-OTHER read-only server view — Buddy panels, swarm runs, git log, usage — goes
+OTHER read-only server view — Buddy panels, git log, usage — goes
 through the keyed cache in
 [atoms/resources.ts](../client/src/atoms/resources.ts), read via
 `usePolledFetch`. Desktop and mobile share it; there is no second mechanism.
@@ -212,14 +211,14 @@ the hook flattened this to `{data, loading, error}`, one `error` field for both
 failures, and views that tested `error` before `data` threw away pages they
 held: on 2026-09-24 one "Failed to fetch" on a slow server replaced a loaded
 Buddy page on the phone with "Could not load buddy", and the desktop directory
-(one failed Sidebar poll of the shared overview key), team settings, swarm
-reviews and the mobile Automations tab blanked the same way. A stale page says
+(one failed Sidebar poll of the shared overview key), team settings
+and the mobile Automations tab blanked the same way. A stale page says
 so quietly (`MobileRefreshNotice` on mobile, a "Could not refresh" line under
 the heading on the desktop Buddy page). Guarded by
 `client/test/failed-refresh-keeps-page.test.tsx`.
 
-`stale` is also why `useSwarmProjects` no longer keeps a `prevProjectsRef`
-shadow copy: retaining the last-known value across a failed refresh is the
+`stale` is also why hooks no longer keep a shadow copy of the last value
+(the old `useSwarmProjects` did): retaining the last-known value across a failed refresh is the
 cache's job, and the error is still reported rather than silently swallowed.
 
 A successful refresh is **structurally shared** with the value it replaces
@@ -262,8 +261,7 @@ carry a private copy of the three-request detail assembly plus generation
 counters; the Sidebar, SearchPalette, BuddiesMobile and BuddiesDashboard each
 fetched `/api/buddies/overview` their own way. Now they share one key each.
 The same applies to `useProviderCatalog` (was a hand-rolled
-`useSyncExternalStore` cache) and `useSwarmRuntimeSnapshots` (one swarm view
-per screen since T20, so one caller per page). If you add a Buddy read,
+`useSyncExternalStore` cache). If you add a Buddy read,
 add it there — not as a `fetch` in a component.
 
 `useBuddyPage` goes one step further: the memos and `talk` that both shells derived from the detail bundle live
@@ -378,10 +376,9 @@ fields and why the synced blob was retired.
   list's times went stale.
 - Display paths: `shortenHomePath()` from `utils/directories.ts`, never an
   inline `/^\/Users\/[^/]+/` regex. It is for display only.
-- Swarm workers: `swarmWorkersByProjectAtom` in `swarm/swarm-workers.ts`
-  (`.get(root) ?? NO_WORKERS` for one project; grouped by project root,
-  promoted workers excluded). Do not regroup
-  `isWorker` conversations in a component.
+- Old oompa `worker` conversations: hidden from the chat inbox and sidebar
+  (`isWorker` in `conversation-index.ts`), collected under the Gallery's collapsed
+  "worker sessions" section. Do not regroup them in a component.
 
 ## Hook ordering and stable values
 

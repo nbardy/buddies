@@ -66,7 +66,7 @@ failed into the same `error` field, so a view that tested `error` before
 `data` swapped a page it was already showing for its full-screen failure:
 on a slow server one "Failed to fetch" replaced a loaded Buddy page on the
 phone with "Could not load buddy" (2026-09-24), and the Buddies directory,
-team settings and swarm reviews blanked the same way. Here the two are
+team settings and swarm reviews (since deleted) blanked the same way. Here the two are
 different variants, and `error` exists only on them, so reading it means
 saying which one you mean:
 
@@ -232,7 +232,7 @@ Conversation list index
 Pattern: one-store-one-index (docs/patterns.md#one-store-one-index)
 
 Every collection view (sidebar groups, gallery, inbox, buddy sidebar, running
-counts, swarm workers, child sessions) filters, groups and sorts on a handful
+counts, child sessions) filters, groups and sorts on a handful
 of fields. They used to read `Conversation` objects straight out of the map,
 so each of ~10 views re-ran a full pass on EVERY conversation event — message,
 queue, sub-agent and every 5 s poller batch — at n ≈ 1,200 (03-app-core §6.2).
@@ -491,7 +491,7 @@ owns the title and dismissal; the form owns the fields and the create.
 
 Both layouts share: the directory field with fuzzy recent-folder + filesystem
 suggestions and path validation (PathAutocomplete), the default directory
-(latest activity → last used → server cwd), Chat and Swarm actions, the
+(latest activity → last used → server cwd), the Create action, the
 disconnected note and the error. Layouts differ only as data (LAYOUT):
   - modal: autofocus the path, full provider/model picker inline.
   - sheet: no autofocus (the phone keyboard would cover the sheet), tappable
@@ -599,11 +599,11 @@ A failed POST removes the entry and the composer gets its text back.
 From `client/src/atoms/prefetch.ts` and `client/src/App.tsx`.
 
 The 2026-10-15 directory audit found 41 transcript pages (17.9 MB decoded) fetched
-for 12 unopened chats, plus 15 unused swarm modules/styles. `requestIdleCallback`
+for 12 unopened chats (and, then, 15 swarm modules/styles, since deleted). `requestIdleCallback`
 ran while the visible route was waiting on network reads: JS idle did not mean
 the page had finished loading. Global history warming and all-route preloading
 were removed. Guard: `node tools/check-route-loading.mjs` opens the real directory
-and rejects unopened transcript reads and swarm-page downloads.
+and rejects unopened transcript reads.
 
 Conversation bodies load through `useConversationBodies` on open and remain in
 the keyed transcript cache for revisits. Route code loads on first navigation

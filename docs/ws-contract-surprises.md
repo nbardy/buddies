@@ -34,7 +34,7 @@ changes transcript messages from a `content` string to a typed `body`. The serve
 | `ready` | Startup hydration finished; `conversationIds` is the authoritative membership. |
 | `patch` | `{id, patch: RowPatch}` — one field group: `run`, `done`, `label`, `activity`, `config` (with the setter's `commandId`), `queue`, `session`, `subagent`, `turn`. Row-level ones move the row; detail-level ones apply only where that detail is loaded. |
 | `ack` | The one acknowledgement: `created` (with the new row, to the creating socket), `accepted` (queue/interrupt admitted), `rejected` (typed error; never a snapshot — the authoritative state goes out as a patch first). |
-| `message` | `{conversationId, role, body}`. `body` is text or ordered typed parts (text, tool use, question, Buddy result/thread, or swarm launch); renderers consume those parts without parsing marker text. |
+| `message` | `{conversationId, role, body}`. `body` is text or ordered typed parts (text, tool use, question, Buddy result/thread; a legacy `swarm_launch` part still decodes from old stored rows); renderers consume those parts without parsing marker text. |
 | `chunk`, `message_complete`, `error`, `buddy_*`, `channel_changed` | Unchanged. |
 
 Deleted: `init`, `conversations_updated`, `conversation_created`, `conversation_updated`,
@@ -43,7 +43,7 @@ Deleted: `init`, `conversations_updated`, `conversation_created`, `conversation_
 `send_message` (no caller).
 
 Bodies and details load on demand: `GET /api/conversations/:id` (detail: config state, queue,
-sub-agents, latest turn's observed model and usage, swarm prefix) and
+sub-agents, latest turn's observed model and usage) and
 `GET /api/conversations/:id/messages?afterSeq=&limit=` (a `MessagePage`: `epoch`, `total`, messages
 with seq > afterSeq, each with the same typed `body`). The epoch changes only when the server
 REPLACED history (not an append), so a client refreshes a grown transcript by paging from its last

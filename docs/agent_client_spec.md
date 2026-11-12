@@ -96,8 +96,7 @@ OpenCode (`supportsDynamicModels`) also accepts ad-hoc path-style IDs
    a. executeCommand({ harness, mode: 'conversation', prompt, cwd, model,
       reasoningEffort, resumeSessionId, ...policy.startTurn() })
    b. fold each UnifiedAgentEvent (text, tools, sub-agents, session, usage)
-   c. TurnWatchdog (bridge / provider-idle / max runtime) and the folder's
-      SwarmObserver run while the turn runs
+   c. TurnWatchdog (bridge / provider-idle / max runtime) runs while the turn runs
 4. Drain: child exit + event EOF join, then the attempt record, the policy's
    end-of-turn hooks, the queue head, and processQueue() for the next turn.
 ```

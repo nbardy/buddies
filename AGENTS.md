@@ -60,8 +60,6 @@ client/src/atoms/ui.ts             → device-local UI prefs + NEW-badge seen in
 server/src/expedition/             → one plan child, replay loop, runTurn calls, Buddy manager and owner routes
 shared/src/expedition.ts           → proposal and view types
 client/src/components/buddies/Expedition*.tsx → proposal, rail and run view in both shells
-{server,client}/src/swarm/          → QUARANTINED swarm/oompa viewer; outside code imports
-                                     only swarm/index.ts (guard: swarm-quarantine.test.ts)
 ```
 
 ## Hard rules (each records an incident; break one only by changing it here, with the reason)
@@ -84,7 +82,7 @@ client/src/components/buddies/Expedition*.tsx → proposal, rail and run view in
   `signal` into every inner `fetch`). A bare `(signal) => Promise<T>` fetcher is
   rejected by the type — with no key there is nothing to cache under, and it is
   the un-keyed form that made seven panels show the previous project's data
-  after a fast switch until 2026-09-06 (SwarmDetail, SwarmAnalytics,
+  after a fast switch until 2026-09-06 (SwarmDetail, SwarmAnalytics, since deleted,
   UsagePanel). Keying supersedes the old abort-on-change guard: a late response
   lands on its own key, which whoever switched away is no longer reading, so
   never re-add a `data.id === currentId` check at a call site.
@@ -255,7 +253,7 @@ pnpm screenshots --only chat,thread,buddy-memory   # names: rows of the sheet / 
 pnpm screenshots --workspace project_… --open # pin a workspace; open the sheet when done
 pnpm screenshots --workspace project_… --channel list_… --thread post_… --focus 'text'
                                               # pin one thread; `focus` scrolls to the post containing text
-pnpm screenshot:mobile --out /tmp/shots       # the older phone-only gallery (chats, buddies, swarms…)
+pnpm screenshot:mobile --out /tmp/shots       # the older phone-only gallery (chats, buddies…)
 ```
 
 **No-regression loop** (every CSS/view consolidation step):
@@ -287,7 +285,7 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   (tested by `pnpm test:tools`).
 - Screens use REAL data found through the API: the richest channel across
   every Buddy workspace, the longest settled chat (general, not running, idle
-  ≥1h), the first Buddy, the first swarm project. A screen whose data is
+  ≥1h), the first Buddy. A screen whose data is
   absent is skipped and recorded, never faked. Streaming is not a screen (a live
   turn always differs); the tail-regroup test covers it.
 - iPad portrait (768px) renders the MOBILE tree; the switch is
@@ -587,7 +585,7 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
 - CSS is global (plain `.css` imports, no modules), so one class defined in
   two files silently fights over the cascade — import order picks the winner.
   Prefix component classes with the component (`.chat-config-summary`, not
-  `.config-summary` — that one is SwarmDetail's, with `flex-direction:
+  `.config-summary` — that one was the old SwarmDetail's, with `flex-direction:
   column`). Genuinely shared primitives (`.empty-state`, `.provider-badge`)
   live once in `client/src/App.css`. Gate G6 in
   `tools/check-client-invariants.sh` fails on any cross-file duplicate.
@@ -617,7 +615,7 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   (`<repo>/.ws<swarm>-w3-i7`), so the raw key gave every iteration its own group
   header — 1,107 groups for one repo on 2026-09-06, all rendering as the same
   truncated `~/git/room-runners-aren…`. The fold is `getProjectRoot` in
-  `utils/directories.ts` (core, not swarm code); it deliberately does NOT live in
+  `utils/directories.ts` (the oompa viewer is gone; old transcripts still need the fold); it deliberately does NOT live in
   `normalizeFolderDirectory`, which answers "which directory did the user mean"
   and must not rewrite a worktree the user typed into its parent repo. Guard:
   `client/test/folder-grouping.test.ts`.

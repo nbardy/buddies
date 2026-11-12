@@ -47,7 +47,7 @@ The submodule implementation lives in `src/build.ts`, `src/process-runner.ts`,
    Do not spread provider conditionals through the generic executor.
 
 3. **The submodule is not an app runtime.**
-   No conversation model, no swarm orchestration, no sidebar/UI state, no
+   No conversation model, no orchestration, no sidebar/UI state, no
    product-specific subagent data model. The submodule only reports normalized
    runtime facts.
 
@@ -169,7 +169,7 @@ startup window and no hydration cap. Guards: `server/test/ingest-history.test.ts
 
 Stable tool instructions belong in native tool descriptions or the dedicated
 model instruction channel. Keep authored text intact; scope generated workflow
-context to the selected operation. Builder, Buddy and swarm envelopes must not
+context to the selected operation. Builder and Buddy envelopes must not
 become user messages after reload. (The merge feature and its
 `unleashd:merge-prefix` envelope were deleted on 2026-09-25.) See
 `product/buddies/AUDIT_PROMPT_PLACEMENT_2026-09-12.md` for rationale and limits.
@@ -201,9 +201,7 @@ stores it in `record.kind`, which is what survives. Guard: `server/test/wire-v3.
 The `Conversation` class is created by `createConversationRuntime` in
 `server/src/conversations/runtime.ts`: record + `TurnQueue` (`turns/queue.ts`) +
 `TurnRunner` (`turns/runner.ts`) + a `TurnPolicy` chosen once by kind
-(`turns/policy.ts`, `buddies/turn-policy.ts`). Timeouts are `turns/watchdog.ts`,
-swarm observation `swarm/observer.ts` (outside code imports swarm only through
-`swarm/index.ts`). `server/src/server.ts` composes its
+(`turns/policy.ts`, `buddies/turn-policy.ts`). Timeouts are `turns/watchdog.ts`. `server/src/server.ts` composes its
 dependencies and registers `server/src/transport/conversation-websocket.ts`.
 Durable config and revision checks belong to `conversations/config-service.ts`
 over the Rust records store (`conversations/config-records.ts`).

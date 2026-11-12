@@ -279,10 +279,7 @@ function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 /**
  * One pass over the newest-first list. `now` dates the sidebar's "recent" cutoff.
  */
-export function buildListIndex(
-  list: readonly ConversationListEntry[],
-  now: number
-): ListIndex {
+export function buildListIndex(list: readonly ConversationListEntry[], now: number): ListIndex {
   const order: string[] = [];
   const idSet = new Set<string>();
   for (const entry of list) {

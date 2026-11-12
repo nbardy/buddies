@@ -81,8 +81,7 @@ A replay returns the original result.
 **Pattern:** wake the worker when the thing it waits for is written (enqueue, settle, file change), plus ONE slow
 backstop tick. Shared clocks run only while someone subscribes.
 **Here:** `client/src/hooks/useTimeTick.ts` (8 intervals → 1); Buddy runner (T11); the shared chat-admission tick
-(`buddies/turn-policy.ts`); `SwarmObservers` in `server/src/swarm/observer.ts` (one async poller per folder, only
-while a turn runs there, replacing one blocking 2 s poller per running conversation). Ingest crate `watch.rs` +
+(`buddies/turn-policy.ts`); (the swarm observer, one async poller per folder, was deleted 2026-11-12). Ingest crate `watch.rs` +
 `filewatch.rs`: FSEvents for discovery, a kqueue watch on each file that is being written, and a batch that closes
 2 ms after its last event (was a fixed 50 ms window: append → onChange p50 68 ms → 4–6 ms). The 10-minute rescan is
 the backstop.
@@ -147,8 +146,8 @@ gates still apply. Guard: `an_owner_post_is_claimed_ahead_of_queued_workers_at_t
 **Pattern:** the feature lives in one folder with ONE entry module. Code outside the folder imports only that
 entry, from a fixed list of files that a guard test pins; on the client every entry export is lazy, so core chunks
 carry none of its code or CSS. Deleting the feature = delete the folder + the call sites of the entry.
-**Here:** swarm/oompa (T10): `server/src/swarm/index.ts`, `client/src/swarm/index.ts`; guards
-`server/test/swarm-quarantine.test.ts`, `client/test/swarm-quarantine.test.ts`.
+**Here:** nothing at present. Its one user, the swarm/oompa viewer (T10), was deleted 2026-11-12 by exactly
+this recipe (delete the folder, then the entry's call sites), which is the pattern's proof.
 
 ## delete-and-migrate
 **Smell:** compatibility shims, permanent flags, migration chains (33 schema versions).

@@ -111,10 +111,7 @@ export function regroupChatMessages(
   const start = tail.firstMessageIndex;
   for (let i = 0; i < start; i++)
     if (messages[i] !== previousMessages[i]) return groupChatMessages(messages);
-  return [
-    ...previousGroups.slice(0, -1),
-    ...groupMessageRange(messages.slice(start), start),
-  ];
+  return [...previousGroups.slice(0, -1), ...groupMessageRange(messages.slice(start), start)];
 }
 
 /** Text frames grow only the last assistant text record; structured frames arrive as records. */

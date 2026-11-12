@@ -117,7 +117,7 @@ one queue, and a failed write goes to stderr (not `console.error`, which the jou
   per minute). Labels live in AsyncLocalStorage: `labelled(name, fn)` (every recurring timer, each HTTP request) and
   `noteActivity(name)` (WS commands, watcher callbacks) name the work AND the async work it starts. Every labelled
   synchronous slice of 100 ms or more is remembered (promise continuations are timed through `v8.promiseHooks`), and
-  the stall takes its label: `timer oompa-poll` for the tick's own body, `timer oompa-poll (async)` for an awaited
+  the stall takes its label: `timer example-poll` for the tick's own body, `timer example-poll (async)` for an awaited
   continuation of it, `unlabelled` for work started under no label or in an untimed non-promise callback (a stream
   event, an fs callback). Name those with `labelled`.
   Each stall row has a `kind`: `busy` (the process burned at least 10% of the stall in CPU) or `descheduled` (it did not run: machine sleep or CPU starvation). Only busy stalls are profiled and journaled, and `perf:audit` counts descheduled ones separately; before 2026-11-03 macOS DarkWake cycles showed up as 15-minute stalls blamed on `timer oompa-poll`.

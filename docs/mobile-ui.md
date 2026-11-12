@@ -26,7 +26,7 @@ Import from `mobile/components/MobileUI.tsx`:
 
 - `MobilePage` for route title, subtitle, width containment, and page spacing.
 - `MobileHeaderAction` for the page's primary action, passed as `headerAside`
-  (the "+ New" button on Chats, Swarms, and Buddies). 44px min tap target.
+  (the "+ New" button on Chats and Buddies). 44px min tap target.
 - `MobileSection` for a labeled group inside a page.
 - `MobileCardButton` for tappable cards with consistent focus and press feedback.
 - `MobileSurface` for a non-interactive card.
@@ -41,7 +41,7 @@ Use the `mobile-ui-stack` class for one-column card lists. Keep data fetching,
 domain copy, feature state, and feature-specific inner layouts in the feature.
 
 ```tsx
-<MobilePage title="Swarms" subtitle="4 projects">
+<MobilePage title="Chats" subtitle="4 projects">
   <div className="mobile-ui-stack">
     <MobileCardButton onClick={openProject}>
       <strong>{project.name}</strong>

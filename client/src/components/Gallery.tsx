@@ -506,16 +506,16 @@ export function Gallery({ filter }: GalleryProps = {}) {
         {workerSessionCount > 0 && !isDoneView && (
           <div className="worker-sessions-section">
             <button
-                type="button"
-                className="worker-sessions-toggle ui-control ui-row"
-                onClick={() => setShowWorkerConversations(!showWorkerConversations)}
-              >
-                <span className={`project-chevron ${!showWorkerConversations ? 'collapsed' : ''}`}>
-                  &#9660;
-                </span>
-                {showWorkerConversations ? 'Hide' : 'Show'} {workerSessionCount} worker session
-                {workerSessionCount !== 1 ? 's' : ''}
-                <span className="worker-sessions-hint ui-muted">(old oompa runs)</span>
+              type="button"
+              className="worker-sessions-toggle ui-control ui-row"
+              onClick={() => setShowWorkerConversations(!showWorkerConversations)}
+            >
+              <span className={`project-chevron ${!showWorkerConversations ? 'collapsed' : ''}`}>
+                &#9660;
+              </span>
+              {showWorkerConversations ? 'Hide' : 'Show'} {workerSessionCount} worker session
+              {workerSessionCount !== 1 ? 's' : ''}
+              <span className="worker-sessions-hint ui-muted">(old oompa runs)</span>
             </button>
 
             {showWorkerConversations &&
