@@ -9,7 +9,7 @@
   "scripts": {
     "preinstall": "node tools/preflight.mjs",
     "prepack": "pnpm build",
-    "bootstrap": "pnpm install --frozen-lockfile --offline && pnpm --dir vendor/agent-cli-tool run build && pnpm --dir shared run build && node tools/ensure-addons.mjs",
+    "bootstrap": "node tools/ensure-agent-cli.mjs && pnpm install --frozen-lockfile --offline && pnpm --dir vendor/agent-cli-tool run build && pnpm --dir shared run build && node tools/ensure-addons.mjs",
     "addons": "node tools/ensure-addons.mjs",
     "dev": "node tools/dev-supervisor.mjs",
     "dev:replace": "node tools/dev-supervisor.mjs --replace",
@@ -38,7 +38,7 @@
     "screenshots": "node tools/screenshots.mjs",
     "test:dev-supervisor": "node --test tools/dev-supervisor.test.mjs tools/dev-runtime.test.mjs tools/bound-child.test.mjs tools/local-domain.test.mjs tools/shared-build.test.mjs tools/watch-server.test.mjs tools/dev-client-compression.test.mjs",
     "test:desktop": "pnpm exec tsx --test desktop/test/*.test.ts && node --test tools/desktop-source.test.mjs tools/desktop-source-git.test.mjs tools/desktop-source-install.test.mjs",
-    "test:tools": "node --test tools/typecheck.test.mjs tools/diagnostics.test.mjs tools/preflight.test.mjs tools/lib/pixel-diff.test.mjs tools/ensure-addons.test.mjs tools/screenshots.test.mjs",
+    "test:tools": "node --test tools/ensure-agent-cli.test.mjs tools/typecheck.test.mjs tools/diagnostics.test.mjs tools/preflight.test.mjs tools/lib/pixel-diff.test.mjs tools/ensure-addons.test.mjs tools/screenshots.test.mjs",
     "test:cli": "pnpm --dir vendor/agent-cli-tool test",
     "test:api": "node test/api.test.js",
     "test:package": "pnpm build && node test/package-smoke.js",

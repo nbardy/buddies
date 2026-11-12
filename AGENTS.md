@@ -524,7 +524,8 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   crate's own inputs only (docs/patterns.md#build-cache), so one-time tools
   live in their own crates (the v33/records import CLIs did, until deleted after the 2026-09-27 swap);
   build them with `cargo build --release -p <crate>` and never move tool code
-  back into an addon crate. Worktree setup is `pnpm run bootstrap`, never
+  back into an addon crate. Worktree setup is `pnpm run bootstrap`, which initializes
+  an empty `vendor/agent-cli-tool` submodule before installing. Never run
   `pnpm setup`: that is a pnpm BUILTIN which edits `~/.zshrc` (it did, 2026-09-26).
 - The Buddy MCP endpoint (`server/src/buddies/mcp.ts`) listens on its OWN loopback
   port. Never mount it on the gated Express app: a turn's bearer is not the owner
