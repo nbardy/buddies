@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { type BuddyContext, createDefaultConversationConfig } from '@unleashd/shared';
+import { type BuddyContext, buddyKind, createDefaultConversationConfig } from '@unleashd/shared';
 import {
   type BuddyCreationServicePorts,
   createBuddyCreationService,
@@ -23,7 +23,7 @@ test('creation fingerprint is stable and covers message intent', () => {
   const base = {
     workingDirectory: '/workspace',
     config: createDefaultConversationConfig('codex'),
-    buddyContext: context,
+    kind: buddyKind(context, 'foreground'),
   };
   assert.equal(creationFingerprint(base), creationFingerprint({ ...base }));
   assert.notEqual(

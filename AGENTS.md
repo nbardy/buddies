@@ -381,10 +381,10 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   Until 2026-09-25 no test was typechecked: a renamed `ConversationsTab` prop
   surfaced as `Cannot read properties of undefined (reading 'flatMap')` inside
   a jotai atom (2026-09-16), and fixtures drifted from real types (missing
-  `done`, stale provider handles). `server/tsconfig.test.json` still has a
-  TEMPORARY exclude list of runtime/Buddy tests left from the lean-rewrite
-  tasks T08/T11. Fix a listed test's types and remove its entry whenever you
-  are in that area; never add to the list.
+  `done`, stale provider handles). Since 2026-11-12 every server test is
+  typechecked: `server/tsconfig.test.json` excludes only the expedition-plan
+  fixtures, which import a bare specifier that resolves in the plan runner. Never
+  add a test to its `exclude`; fix the test's types.
 
 - Typecheck the client with `tsc -b`, never `tsc --noEmit`. `client/tsconfig.json`
   is a solution file (`"files": []` + project references), so plain

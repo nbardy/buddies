@@ -18,10 +18,6 @@
     "dist",
     // Plan folders import the bare specifier `expedition`, which resolves only in the plan
     // runner and in the typecheck gate (expedition-kernel/gates.ts checks them there).
-    "test/fixtures/expedition-plans",
-    // TEMPORARY. These files still carry type drift and belong to other tasks of
-    // the lean rewrite. Each task removes its entries; the goal is an empty list.
-    // T11 (Buddy test replacement):
-    "test/buddy-creation-service.test.ts"
+    "test/fixtures/expedition-plans"
   ]
 }
