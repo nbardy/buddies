@@ -7,19 +7,6 @@
 .threads-card {
   --threads-inset: var(--sp-9);
 }
-.threads-head,
-.threads-fold {
-  padding: var(--sp-4) var(--threads-inset) 0;
-  border: 0;
-  background: none;
-  color: var(--text-bright);
-  font-size: var(--fs-3);
-  text-decoration: none;
-}
-.threads-fold {
-  align-self: flex-start;
-  color: var(--accent);
-}
 .threads-header {
   flex-wrap: nowrap;
   gap: var(--sp-5);

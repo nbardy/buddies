@@ -3,6 +3,23 @@
 .channel-post-content {
   position: relative;
 }
+.channel-message-preview {
+  display: flow-root;
+  overflow: hidden;
+}
+.threads-head,
+.threads-fold {
+  padding: var(--sp-4) var(--threads-inset) 0;
+  border: 0;
+  background: none;
+  color: var(--text-bright);
+  font-size: var(--fs-3);
+  text-decoration: none;
+}
+.threads-fold {
+  align-self: flex-start;
+  color: var(--accent);
+}
 .channel-post-chips {
   flex-wrap: wrap;
   gap: var(--sp-2);
@@ -10,8 +27,6 @@
   font-size: var(--fs-3);
 }
 .channel-post-chip {
-  display: inline-flex;
-  align-items: center;
   gap: var(--sp-1);
   padding: var(--sp-1) var(--sp-3);
   border: 1px solid var(--border-subtle);
@@ -43,8 +58,6 @@
   pointer-events: none;
 }
 .channel-post-tools button {
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
   min-width: 28px;
   min-height: 28px;

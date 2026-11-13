@@ -1,4 +1,11 @@
-import { type ReactNode, useState } from 'react';
+import {
+  type CSSProperties,
+  type ReactNode,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { recordEmojiUse } from '../../atoms/emoji-usage';
 import { invalidateChannelResources } from '../../atoms/resources';
@@ -85,13 +92,18 @@ export function ChannelPostContent({
     // biome-ignore lint/a11y/useSemanticElements: a row of action buttons, not a form; <fieldset> adds form borders and padding.
     <div className="channel-post-tools" role="group" aria-label="Edit or react">
       {post.author.kind === 'owner' && !clipped && (
-        <button type="button" aria-label="Edit message" onClick={() => setEditing(post)}>
+        <button
+          className="ui-inline-row"
+          type="button"
+          aria-label="Edit message"
+          onClick={() => setEditing(post)}
+        >
           Edit
         </button>
       )}
       <button
         type="button"
-        className="channel-post-add-reaction"
+        className="channel-post-add-reaction ui-inline-row"
         aria-label="Add emoji reaction"
         title="Add emoji reaction"
         disabled={busy}
@@ -139,7 +151,12 @@ export function ChannelPostContent({
           }}
         />
       ) : (
-        <PostBody post={post} directory={directory} />
+        <PostBody
+          key={`${post.id}:${clipped}`}
+          post={post}
+          directory={directory}
+          initiallyExpanded={asked}
+        />
       )}
       {clipped && !editing && (
         <button
@@ -161,7 +178,7 @@ export function ChannelPostContent({
             <button
               type="button"
               key={emoji}
-              className="channel-post-chip"
+              className="channel-post-chip ui-inline-row"
               aria-label={`${value.active ? 'Remove' : 'Add'} ${emoji} reaction`}
               aria-pressed={value.active}
               disabled={busy}
@@ -183,18 +200,86 @@ export function ChannelPostContent({
 
 /** δ: a post's text, or the expedition card a host post carries in place of its plain fallback
  * text (the fallback is for readers without the card: a Buddy reading the thread). */
-function PostBody({ post, directory }: { post: ClippedPost; directory: WorkspaceDirectory }) {
+function PostBody({
+  post,
+  directory,
+  initiallyExpanded,
+}: {
+  post: ClippedPost;
+  directory: WorkspaceDirectory;
+  initiallyExpanded: boolean;
+}) {
   const card: ExpeditionCard = expeditionCardOf(post);
   switch (card.t) {
-    case 'none':
-      return (
+    case 'none': {
+      const markdown = (
         <ChannelMarkdown
           body={channelPostBody(post)}
           buddyNames={directory.buddyNames}
           tasks={directory.taskById}
         />
       );
+      return post.clippedFrom !== undefined ? (
+        markdown
+      ) : (
+        <ExpandableMessage initiallyExpanded={initiallyExpanded}>{markdown}</ExpandableMessage>
+      );
+    }
     case 'proposal':
       return <ProposalCard proposal={card.proposal} />;
   }
+}
+
+const MESSAGE_PREVIEW_HEIGHT = 320;
+
+// Pattern: one-definition (docs/patterns.md#one-definition)
+// Channel, thread and Threads-card posts in both shells share this fold. Measure rendered
+// height so narrow screens, code blocks and loaded images cannot turn a short string into a wall.
+// Guard: tools/check-message-fold.mjs exercises real posts and both toggles in each shell.
+function ExpandableMessage({
+  children,
+  initiallyExpanded,
+}: {
+  children: ReactNode;
+  initiallyExpanded: boolean;
+}) {
+  const [expanded, setExpanded] = useState(initiallyExpanded);
+  const [long, setLong] = useState(false);
+  const content = useRef<HTMLDivElement>(null);
+  const id = useId();
+  useLayoutEffect(() => {
+    const element = content.current;
+    if (!element) return;
+    const measure = () => setLong(element.getBoundingClientRect().height > MESSAGE_PREVIEW_HEIGHT);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <>
+      <div
+        id={id}
+        className="channel-message-preview"
+        style={{ maxHeight: expanded ? undefined : MESSAGE_PREVIEW_HEIGHT }}
+        onFocusCapture={() => setExpanded(true)}
+      >
+        <div ref={content} className="channel-message-preview">
+          {children}
+        </div>
+      </div>
+      {long && (
+        <button
+          type="button"
+          className="threads-fold channel-message-fold"
+          style={{ '--threads-inset': '0px' } as CSSProperties}
+          aria-expanded={expanded}
+          aria-controls={id}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </>
+  );
 }
