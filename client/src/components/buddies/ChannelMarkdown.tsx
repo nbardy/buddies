@@ -15,6 +15,7 @@ import { createPortal } from 'react-dom';
 import { type Components, type ExtraProps, defaultUrlTransform } from 'react-markdown';
 import { Link } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
 import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
 import { ChatActivity } from '../../ui/ChatActivity';
@@ -22,7 +23,10 @@ import { useMarkdownPipeline } from '../../utils/lazyMarkdownPlugins';
 import { defineMarkdownFlavor, renderMarkdownCached } from '../../utils/markdown-pipeline';
 import { remarkBreaks } from '../../utils/remark-breaks';
 import { formatToolUse } from '../../utils/tool-presentation';
-import { CodeBlockFrame } from '../../views/transcript/markdown-components';
+import {
+  CodeBlockFrame,
+  normalizeLatexDelimiters,
+} from '../../views/transcript/markdown-components';
 import { AskUserQuestionWidget } from '../AskUserQuestion';
 import { BuddyBuilderResultCard } from './BuddyBuilderResultCard';
 import { ChannelTaskOverlay } from './ChannelTaskOverlay';
@@ -56,7 +60,12 @@ function channelUrlTransform(url: string): string {
   return /^(buddy|task):/.test(url) ? url : defaultUrlTransform(url);
 }
 
-const CHANNEL_MARKDOWN = defineMarkdownFlavor([remarkGfm, remarkBreaks], channelUrlTransform);
+// Fix-guard: channel reward formulas rendered as raw TeX (owner screenshot, 2026-11-14).
+// Use the chat math parser and delimiter normalization; channel-markdown tests cover both forms.
+const CHANNEL_MARKDOWN = defineMarkdownFlavor(
+  [remarkGfm, remarkMath, remarkBreaks],
+  channelUrlTransform
+);
 
 const CARD_WIDTH = 280;
 const CARD_GAP = 6;
@@ -531,7 +540,9 @@ export const ChannelMarkdown = memo(function ChannelMarkdown({
   const parts = useMemo(() => channelParts(body), [body]);
   const pipeline = useMarkdownPipeline(CHANNEL_MARKDOWN);
   const markdown = (text: string, key?: number) => (
-    <Fragment key={key}>{renderMarkdownCached(pipeline, text, CHANNEL_COMPONENTS)}</Fragment>
+    <Fragment key={key}>
+      {renderMarkdownCached(pipeline, normalizeLatexDelimiters(text), CHANNEL_COMPONENTS)}
+    </Fragment>
   );
   return (
     <ChannelMarkdownDataContext.Provider value={data}>

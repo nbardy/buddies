@@ -343,3 +343,20 @@ button:focus-visible {
   outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
 }
+
+/* LaTeX rendered by KaTeX */
+:is(.message-content, .channel-markdown) .katex-display {
+  margin: 12px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: var(--sp-2) 0;
+}
+
+:is(.message-content, .channel-markdown) .katex-display > .katex {
+  text-align: left;
+}
+
+:is(.message-content, .channel-markdown) .katex-error {
+  color: var(--accent-error, #ef5350);
+  font-family: var(--font-mono);
+}

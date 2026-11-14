@@ -205,23 +205,6 @@
   margin-bottom: 0;
 }
 
-/* LaTeX rendered by KaTeX */
-.message-content .katex-display {
-  margin: 12px 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: var(--sp-2) 0;
-}
-
-.message-content .katex-display > .katex {
-  text-align: left;
-}
-
-.message-content .katex-error {
-  color: var(--accent-error, #ef5350);
-  font-family: var(--font-mono);
-}
-
 /* Inline code */
 .message-content code {
   background: color-mix(in srgb, var(--queue) 12%, transparent);

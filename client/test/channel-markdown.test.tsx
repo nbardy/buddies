@@ -120,6 +120,28 @@ const renderChannel = (body: string) =>
     </MemoryRouter>
   );
 
+test('channel formulas reach the math renderer in dollar and LaTeX notation, while code stays literal', () => {
+  for (const [inline, display] of [
+    ['$s_i$', '$$\nR_i=\\frac{x_i}{s_i}\n$$'],
+    [
+      String.raw`\(s_i\)`,
+      String.raw`\[
+R_i=\frac{x_i}{s_i}
+\]`,
+    ],
+  ]) {
+    const html = renderChannel(`Reward ${inline}:\n\n${display}`);
+    // SSR has not loaded the lazy KaTeX chunk; these are its typed input nodes.
+    assert.match(html, /class="language-math math-inline">s_i<\/code>/);
+    assert.match(html, /class="language-math math-display">R_i=\\frac\{x_i\}\{s_i\}/);
+    assert.doesNotMatch(html, /<em>/);
+  }
+  const code = renderChannel('`\\(s_i\\)`\n\n```tex\n\\[R_i=\\frac{x_i}{s_i}\\]\n```');
+  assert.doesNotMatch(code, /math-inline|math-display/);
+  assert.match(code, /\\\(s_i\\\)/);
+  assert.match(code, /\\\[R_i=\\frac/);
+});
+
 // Owner report 2026-09-24 (#general thread): a mention reply showed the raw
 // `<!--buddy_team_configuration:%7B%22…-->` blob under "6 tool calls". Team
 // configuration was retired with the v2 Buddy server (T11), but old posts
