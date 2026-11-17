@@ -65,6 +65,36 @@ function config(overrides: Partial<ConversationConfig> = {}): ConversationConfig
   };
 }
 
+// Guard the registry -> served catalog -> execution path: adding a CLI model alone
+// must not leave Unleashd rejecting it or starting default Codex turns on an older model.
+test('Codex inherits GPT-6.2 models and defaults to Astra at medium effort', () => {
+  const defaults = resolveConfigAgainstProviderCatalog(config());
+  assert.equal(defaults.status, 'resolved');
+  if (defaults.status === 'resolved') {
+    assert.equal(defaults.value.modelId, 'gpt-6.2-astra');
+    assert.equal(defaults.value.reasoningEffort, 'medium');
+  }
+  for (const modelId of ['gpt-6.2-astra', 'gpt-6.2-sol']) {
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']) {
+      const resolved = resolveConfigAgainstProviderCatalog(
+        config({
+          model: { mode: 'explicit', modelId },
+          reasoning: { mode: 'explicit', effort },
+        })
+      );
+      assert.equal(resolved.status, 'resolved');
+      if (resolved.status !== 'resolved') continue;
+      const command = buildCommand('codex', {
+        model: resolved.value.modelId,
+        reasoning: resolved.value.reasoningEffort,
+        prompt: 'test',
+      });
+      assert.equal(command.argv[command.argv.indexOf('-m') + 1], modelId);
+      assert.ok(command.argv.includes(`model_reasoning_effort=${effort}`));
+    }
+  }
+});
+
 test('application defaults retain the refreshed picker while explicit reasoning passes through', () => {
   const defaults = resolveConfigAgainstProviderCatalog(config());
   assert.equal(defaults.status, 'resolved');
