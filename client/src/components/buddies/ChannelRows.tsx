@@ -15,7 +15,6 @@ import {
   postPurposeTag,
 } from './channel-data';
 import { channelLinkPath, postLink } from './channel-link';
-import { ReplyRetry } from './HarnessPicker';
 import type { Post, ThreadStat } from './types';
 
 // The desktop transcript's rows, shared by the channel, thread, Task filter and Threads panes.
@@ -324,7 +323,6 @@ export function LeadRow({
           <PostMeta post={post} context={context} />
         </div>
         <PostBody post={post} context={context} toolsHost={toolsHost} />
-        <ReplyRetry post={post} />
         <ThreadSummary post={post} context={context} />
         {children}
       </div>
@@ -356,7 +354,6 @@ function ContinuationRow({ post, context }: { post: Post; context: RowContext })
           <PostMeta post={post} context={context} />
         </span>
         <PostBody post={post} context={context} toolsHost={toolsHost} />
-        <ReplyRetry post={post} />
         <ThreadSummary post={post} context={context} />
       </div>
       <MessageActions post={post} context={context} hostRef={setToolsHost} />

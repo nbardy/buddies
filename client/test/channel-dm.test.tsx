@@ -479,7 +479,7 @@ test('a restarted backend still shows a missing-CLI failure from the journaled a
     });
   seedNew([]);
   const html = desktop(NEW);
-  assert.match(html, /role="alert"[^>]*>Couldn&#x27;t start codex/);
+  assert.match(html, /role="alert"[\s\S]*>Couldn&#x27;t start codex/);
 
   // With the live message still present it is the one failure row, not two.
   seedNew([message('system', "Couldn't start codex: the `codex` command was not found.", 2)]);
@@ -521,4 +521,77 @@ test('a replying DM offers Interrupt and Queue with their desktop shortcuts', as
   assert.match(active, />Interrupt · Enter</);
   assert.match(active, />Queue · Shift\+Tab</);
   assert.match(active, /title="Send after the current reply finishes"/);
+});
+
+// Reconnect attempts are one transient operational status, not permanent messages.
+test('DM retry lifecycle replaces reconnect errors and clears the widget on success', async () => {
+  await seed();
+  const { groupChatMessages } = await import('../src/utils/chat-message-groups');
+  const { dmRows } = await import('../src/components/buddies/channel-dm');
+  const attempts = [
+    message('user', 'Please recover', 40),
+    message('assistant', '', 40),
+    ...Array.from({ length: 5 }, (_, i) =>
+      message('system', `Reconnecting… ${i + 1}/5 (workspace routing discovery failed)`, 41)
+    ),
+    message('system', 'workspace routing discovery failed', 42),
+    message('system', 'workspace routing discovery failed', 42),
+  ];
+  const write = (messages: Message[], run: 'running' | 'idle') => {
+    const row = jotaiStore.get(rowsAtom).get(NEW)!;
+    jotaiStore.set(rowsAtom, new Map([...jotaiStore.get(rowsAtom), [NEW, { ...row, run }]]));
+    jotaiStore.set(transcriptStore.patch, {
+      set: [[NEW, { tag: 'loaded', epoch: 0, messages, detail: syntheticDetail(NEW) }]],
+      remove: [],
+    });
+  };
+  write(attempts, 'running');
+  let html = desktop(NEW);
+  assert.equal(html.match(/class="channel-reply-status /g)?.length, 1);
+  assert.match(html, /role="status"/);
+  assert.match(html, /Retrying…/);
+  assert.doesNotMatch(html, />Retry<|Lead is replying/);
+  write(attempts, 'idle');
+  html = desktop(NEW);
+  assert.equal(html.match(/role="alert"/g)?.length, 1);
+  assert.match(html, />Retry</);
+  assert.match(html, /Retry with model…/);
+  const recovered: Message = {
+    ...message('assistant', 'Recovered answer', 43),
+    completionReason: 'success',
+    completedAt: at(43),
+  };
+  write([...attempts, recovered], 'idle');
+  assert.doesNotMatch(desktop(NEW), /channel-reply-status|workspace routing discovery/);
+  assert.match(desktop(NEW), /Recovered answer/);
+  // A manual retry replays the owner's message; success must clear the original notice too.
+  assert.equal(
+    dmRows(
+      groupChatMessages([...attempts, message('user', 'Please recover', 43), recovered]),
+      []
+    ).filter((row) => row.kind === 'failure').length,
+    0
+  );
+});
+
+test('channel reply status recovery keeps one failure per trigger and removes it after an answer', async () => {
+  const { channelRows } = await import('../src/components/buddies/channel-data');
+  const failure = (id: string) =>
+    postFixture({
+      id,
+      ord: id,
+      author: { kind: 'buddy', id: 'lead' },
+      rootId: 'root',
+      replyToId: 'trigger',
+      purpose: 'reply_failed',
+      body: 'Couldn’t reply: workspace routing discovery failed',
+    });
+  const first = failure('a');
+  const second = failure('b');
+  const other = { ...failure('c'), replyToId: 'other-trigger' };
+  const answer = { ...failure('d'), purpose: 'reply', body: 'Recovered answer' };
+  const ids = (posts: (typeof first)[]) =>
+    channelRows(posts).flatMap((row) => (row.kind === 'day' ? [] : [row.post.id]));
+  assert.deepEqual(ids([second, first]), ['b']);
+  assert.deepEqual(ids([answer, other, second, first]), ['c', 'd']);
 });

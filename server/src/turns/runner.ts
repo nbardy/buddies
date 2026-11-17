@@ -14,7 +14,12 @@ import type {
   ServerMessageInput,
   SubAgent,
 } from '@unleashd/shared';
-import { AskUserQuestionSchema, bodyText, toolContentPart } from '@unleashd/shared';
+import {
+  AskUserQuestionSchema,
+  bodyText,
+  isProviderRetryMessage,
+  toolContentPart,
+} from '@unleashd/shared';
 import {
   TURN_BRIDGE_TIMEOUT_MS,
   TURN_MAX_RUNTIME_MS,
@@ -623,6 +628,13 @@ export class TurnRunner {
       // Guard: conversation-runtime rejected-rollout retries + config-service durable invalidation.
       this.host.markSessionStarted(false);
       await this.host.invalidateSession();
+    }
+    // Pattern: fix-guards (docs/patterns.md#fix-guards)
+    // Reconnect attempts used to poison even a successful turn's outcome and fill DMs with errors.
+    // Keep the live status, but let the final provider outcome decide. Guard: reconnect recovery.
+    if (isProviderRetryMessage(message)) {
+      this.surfaceError(message);
+      return;
     }
     const command = missingCommand(message);
     // Fix guard: a provider binary missing from PATH reached the owner as nothing (an empty DM

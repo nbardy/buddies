@@ -464,9 +464,23 @@ export function channelRows(newestFirst: readonly Post[]): ChannelRow[] {
   // By the ordered id (write order), never by createdAt: posts written in one millisecond tie on
   // it and came back shuffled (2026-09-25). Plain string order is the id's order.
   const posts = [...newestFirst].sort((a, b) => (a.ord < b.ord ? -1 : a.ord > b.ord ? 1 : 0));
+  // Pattern: fix-guards (docs/patterns.md#fix-guards)
+  // Repeated delivery attempts left permanent failure posts beside a successful answer.
+  // Project one status per trigger/Buddy, retaining the durable posts. Guard: reply status recovery.
+  const statuses = new Map<string, Post>();
+  const superseded = new Set<string>();
+  for (const post of posts) {
+    if (post.author.kind !== 'buddy' || !post.replyToId) continue;
+    const key = `${post.replyToId}:${post.author.id}`;
+    const previous = statuses.get(key);
+    if (previous) superseded.add(previous.id);
+    if (post.purpose === 'reply_failed') statuses.set(key, post);
+    else statuses.delete(key);
+  }
   const rows: ChannelRow[] = [];
   let previous: Post | null = null;
   for (const post of posts) {
+    if (superseded.has(post.id)) continue;
     const newDay = previous === null || dayKey(previous.createdAt) !== dayKey(post.createdAt);
     if (newDay) {
       rows.push({

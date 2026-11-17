@@ -831,9 +831,6 @@ a.channel-browser-buddy-done {
   background: color-mix(in srgb, var(--theme-warning) 16%, transparent);
   color: var(--theme-warning);
 }
-.channel-browser-message[data-purpose="reply_failed"] .channel-markdown {
-  color: var(--text-muted);
-}
 .channel-browser-thread-summary {
   flex-wrap: wrap;
   gap: var(--sp-2) var(--sp-6);

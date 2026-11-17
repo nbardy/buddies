@@ -24,6 +24,12 @@ export function isHarnessRetryFailure(text: string): boolean {
     // A provider's capacity error ("Selected model is at capacity"): retry on another model.
     /at capacity/i.test(text) ||
     /completed the turn with reason:\s*error/i.test(text) ||
-    /not supported when using/i.test(text)
+    /not supported when using/i.test(text) ||
+    /provider|workspace routing discovery|reconnect|timed? ?out|connection|network/i.test(text)
   );
+}
+
+/** Provider reconnect attempts are recoverable status, not a terminal turn failure. */
+export function isProviderRetryMessage(text: string): boolean {
+  return /^Reconnecting[.…]*\s*\d+\/\d+\b/i.test(text.trim());
 }

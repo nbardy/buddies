@@ -31,7 +31,6 @@ import { useConversationDraft } from '../../hooks/useConversationDraft';
 import { uploadFilesWithDrainRetry } from '../../hooks/usePendingAttachments';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
-import { useTurnDiagnostics } from '../../hooks/useTurnDiagnostics';
 import { ConfigOverlay } from '../../views/config/ConfigOverlay';
 import { modelSummary } from '../../views/config/config-options';
 import { buddyWrite, errorText } from './api';
@@ -45,14 +44,15 @@ import { type OlderEdge, clockTime, useFollowBottom } from './channel-data';
 import { type DmRow, dmRows, lastOwnerText, startFailureText, tailRows } from './channel-dm';
 import { type ChannelTask, mediaMarkdown } from './channel-text';
 import { HarnessPicker } from './HarnessPicker';
+import { ReplyStatus } from './ReplyStatus';
 import './ChannelComposer.css';
 import './ChannelDm.css';
 
 // A Buddy DM inside Channels (493c1c7), drawn as a thread: sigil, name, time and ChannelMarkdown
 // for both sides, and a channel-style composer. It is still the Buddy's ongoing owner
 // conversation. "New chat" starts the next generation without a handoff; earlier generations
-// stay above a divider, and a link to an earlier one offers "Latest". An out-of-tokens turn offers
-// a retry: a new chat on another harness that resends the owner's last message.
+// stay above a divider, and a link to an earlier one offers "Latest". A failed turn offers
+// a retry: resend in this chat, or start a new chat on another harness.
 // Desktop and phone differ only in class names (the channel pane vs the phone channel screen).
 
 export type DmFrame = 'desktop' | 'mobile';
@@ -157,7 +157,6 @@ export function ChannelBuilder({
   const row = useAtomValue(rowFamily(conversationId));
   const transcript = useAtomValue(transcriptFamily(conversationId));
   const groups = useAtomValue(groupsFamily(conversationId));
-  const stream = useAtomValue(streamFamily(conversationId));
   const command = useAtomValue(commandFor(conversationId)).config;
   const bodies = useConversationBodies(conversationId);
   const { catalog } = useProviderCatalog();
@@ -251,12 +250,6 @@ export function ChannelBuilder({
             top={null}
           />
         </div>
-        {running && stream.length === 0 && (
-          <p className={f.note}>
-            <TypingDots />
-            <span>Buddy Builder is replying…</span>
-          </p>
-        )}
       </div>
       {composeShell(
         <DmComposer
@@ -312,11 +305,9 @@ export function ChannelDm({
   // it waits here until "New convo" confirms it.
   const [harnessDraft, setHarnessDraft] = useState<ConversationConfig | null>(null);
   const [defaultError, setDefaultError] = useState<string | null>(null);
-  const stream = useAtomValue(streamFamily(conversationId));
   const groups = useAtomValue(groupsFamily(conversationId));
   const chain = usePolledFetch<DirectChain>(directChainUrl(buddyId), 15_000);
   const running = row !== null && row.run !== 'idle';
-  const diagnostics = useTurnDiagnostics(conversationId);
   const queue = queueOf(transcript);
   const messages = messagesOf(transcript);
   const [limit, setLimit] = useState(DM_ROW_WINDOW);
@@ -349,13 +340,10 @@ export function ChannelDm({
     follow.pin();
     onConversation(next);
   };
-  const retryText = lastOwnerText(messages);
   const detail = detailOf(transcript);
   const config = detail?.config.config ?? null;
   const configSaving = configCommand?.state.tag === 'sent';
   const configError = configCommand?.state.tag === 'rejected' ? configCommand.state.message : null;
-  const outOfTokens =
-    !running && diagnostics.attempt?.terminalCause === 'out_of_tokens' && retryText !== null;
   const refreshContextControl =
     latest === conversationId && messages.length + queue.length > 0 && config !== null ? (
       <button
@@ -511,27 +499,14 @@ export function ChannelDm({
                   setLimit((current) => current + DM_ROW_WINDOW);
                 }}
                 top={earlierButton}
+                onRetryWithModel={
+                  id === conversationId && lastOwnerText(messages) !== null
+                    ? (next) => newChat({ config: next, message: lastOwnerText(messages)! })
+                    : undefined
+                }
               />
             ))}
           </div>
-        )}
-        {running && stream.length === 0 && (
-          <p className={f.note}>
-            <TypingDots />
-            <span>{buddyName} is replying…</span>
-          </p>
-        )}
-        {outOfTokens && (
-          <HarnessPicker
-            label="Retry with a different harness"
-            note="This harness is out of tokens. The retry opens a new chat on the one you pick and resends your last message."
-            confirm="Retry"
-            seed={null}
-            excluded={row?.provider ?? null}
-            buddy
-            onConfirm={(config) => newChat({ config, message: retryText })}
-            placement="above"
-          />
         )}
         {latest !== conversationId && (
           <button
@@ -568,6 +543,7 @@ function DmGeneration({
   scrollRef,
   onReachTop,
   top,
+  onRetryWithModel,
 }: {
   conversationId: string;
   /** The generation before this one; null for the first, which has no divider. */
@@ -582,14 +558,16 @@ function DmGeneration({
   onReachTop(): void;
   /** Drawn above the rows once none are held back. */
   top: ReactNode;
+  onRetryWithModel?(config: ConversationConfig): Promise<unknown>;
 }) {
   useConversationBodies(conversationId);
   const groups = useAtomValue(groupsFamily(conversationId));
-  const queue = queueOf(useAtomValue(transcriptFamily(conversationId)));
+  const transcript = useAtomValue(transcriptFamily(conversationId));
+  const queue = queueOf(transcript);
   const { catalog } = useProviderCatalog();
   const generation = useAtomValue(rowFamily(conversationId));
   const divider = previousId !== null;
-  const config = detailOf(useAtomValue(transcriptFamily(conversationId)))?.config.config ?? null;
+  const config = detailOf(transcript)?.config.config ?? null;
   // The previous generation's detail alone (~1 KB): its config names the divider's harness change
   // without loading that chat's whole history.
   const before = usePolledFetch<ConversationDetail>(
@@ -601,7 +579,7 @@ function DmGeneration({
     config && before && (config.provider !== before.provider || summary(config) !== summary(before))
       ? `${config.provider} · ${summary(config)}`
       : null;
-  const attempt = detailOf(useAtomValue(transcriptFamily(conversationId)))?.latestAttempt ?? null;
+  const attempt = detailOf(transcript)?.latestAttempt ?? null;
   const rows = dmRows(
     groups,
     queue,
@@ -615,8 +593,16 @@ function DmGeneration({
       : undefined,
     config && attempt?.terminalCause === 'spawn_failed'
       ? startFailureText(config.provider)
-      : undefined
+      : attempt?.terminalCause === 'out_of_tokens'
+        ? 'This harness is out of tokens. Retry or choose another harness.'
+        : attempt?.terminalCause === 'provider_error'
+          ? 'The provider could not complete this reply.'
+          : undefined,
+    generation !== null && generation.run !== 'idle'
   );
+  const retryText = lastOwnerText(messagesOf(transcript));
+  const stream = useAtomValue(streamFamily(conversationId));
+  const pending = generation !== null && generation.run !== 'idle';
   const shown = tailRows(rows, limit);
   return (
     <>
@@ -639,6 +625,25 @@ function DmGeneration({
             <DmRowView
               key={row.key}
               row={row}
+              retry={
+                row.kind === 'failure' && row === rows.at(-1) && retryText !== null
+                  ? () => queueMessage(conversationId, retryText)
+                  : undefined
+              }
+              recovery={
+                row === rows.at(-1) && config && onRetryWithModel ? (
+                  <HarnessPicker
+                    label="Retry with model…"
+                    note="Choose another harness to retry your last message in a new chat. Saved Buddy memory carries forward."
+                    confirm="Retry"
+                    seed={null}
+                    excluded={config.provider}
+                    buddy
+                    placement="above"
+                    onConfirm={onRetryWithModel}
+                  />
+                ) : null
+              }
               frame={frame}
               name={
                 (row.kind === 'lead' || row.kind === 'continuation') && row.author === 'buddy'
@@ -651,18 +656,30 @@ function DmGeneration({
           ))}
         </ol>
       )}
+      {pending &&
+        stream.length === 0 &&
+        !rows.some((row) => row.kind === 'failure' && row.retrying) && (
+          <p className={frame.note}>
+            <TypingDots />
+            <span>{buddyName} is replying…</span>
+          </p>
+        )}
     </>
   );
 }
 
 function DmRowView({
   row,
+  retry,
+  recovery,
   frame,
   name,
   buddyNames,
   tasks,
 }: {
   row: DmRow;
+  retry?: () => Promise<unknown>;
+  recovery: ReactNode;
   frame: Frame;
   name: string;
   buddyNames: Readonly<Record<string, string>>;
@@ -679,8 +696,12 @@ function DmRowView({
       return <li className="channel-dm-notice">{row.label}</li>;
     case 'failure':
       return (
-        <li className="channel-dm-failure" role="alert">
-          {row.label}
+        <li className={frame.continuation}>
+          <div className={frame.content}>
+            <ReplyStatus message={row.label} pending={row.retrying} retry={retry}>
+              {recovery}
+            </ReplyStatus>
+          </div>
         </li>
       );
     case 'lead':

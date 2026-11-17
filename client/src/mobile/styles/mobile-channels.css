@@ -384,9 +384,6 @@ a.mobile-channels-wake-done {
   color: var(--text-muted);
   font-size: var(--fs-4);
 }
-.mobile-channel-post[data-purpose="reply_failed"] .channel-markdown {
-  color: var(--text-muted);
-}
 .mobile-channel .channel-markdown {
   font-size: var(--fs-post);
 }

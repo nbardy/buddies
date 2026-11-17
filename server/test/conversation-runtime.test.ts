@@ -1917,3 +1917,37 @@ exit 127
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Reconnect warnings used to poison an otherwise successful run (and leave channel failure posts).
+test('reconnect recovery completes successfully instead of retaining a provider failure', async () => {
+  async function* events() {
+    yield { type: 'turn.started' as const };
+    for (let attempt = 1; attempt <= 5; attempt++)
+      yield {
+        type: 'error' as const,
+        message: `Reconnecting... ${attempt}/5 (workspace routing discovery failed)`,
+      };
+    yield { type: 'text.delta' as const, text: 'Recovered answer' };
+    yield { type: 'turn.complete' as const, reason: 'success' as const };
+  }
+  const fixture = runtimeFixture({
+    executeTurn: fakeExecuteTurn(() => ({
+      events: events(),
+      completed: Promise.resolve({
+        exitCode: 0,
+        signal: null,
+        sessionId: 'provider-session',
+        reason: 'success',
+      }),
+      stop: () => undefined,
+    })),
+  });
+  const outcomes: string[] = [];
+  fixture.conversation.on('buddy-turn-failed', (reason: string) =>
+    outcomes.push(`failed: ${reason}`)
+  );
+  fixture.conversation.on('buddy-turn-complete', (text: string) => outcomes.push(text));
+  fixture.conversation.sendMessage('Recover');
+  await eventually(() => assert.equal(fixture.conversation.hasActiveProcess(), false));
+  assert.deepEqual(outcomes, ['Recovered answer']);
+});

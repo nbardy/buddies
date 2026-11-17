@@ -1,3 +1,4 @@
+import { isHarnessRetryFailure } from '@unleashd/shared';
 import {
   type CSSProperties,
   type ReactNode,
@@ -23,6 +24,8 @@ import {
 } from './channel-data';
 import { EmojiPicker } from './EmojiPicker';
 import { ProposalCard } from './ExpeditionProposal';
+import { ReplyRetry } from './HarnessPicker';
+import { ReplyStatus } from './ReplyStatus';
 import type { ClippedPost, ThreadPage } from './types';
 import './ChannelPostContent.css';
 
@@ -209,6 +212,12 @@ function PostBody({
   directory: WorkspaceDirectory;
   initiallyExpanded: boolean;
 }) {
+  if (post.purpose === 'reply_failed')
+    return isHarnessRetryFailure(post.body) ? (
+      <ReplyRetry post={post} />
+    ) : (
+      <ReplyStatus message={post.body} pending={false} />
+    );
   const card: ExpeditionCard = expeditionCardOf(post);
   switch (card.t) {
     case 'none': {

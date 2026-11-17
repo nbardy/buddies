@@ -4,8 +4,9 @@ import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { errorText, retryFailedReply } from './api';
 import { ChannelModelPicker } from './ChannelModelPicker';
-import { seatsResource } from './channel-data';
-import type { Post, ThreadSeat } from './types';
+import { respondingUrl, seatsResource } from './channel-data';
+import { ReplyStatus } from './ReplyStatus';
+import type { ChannelResponse, Post, ThreadSeat } from './types';
 import './ChannelComposer.css';
 
 // Retry and new-chat actions reuse the mention chip's model picker. A Buddy turn needs
@@ -126,23 +127,38 @@ export function ReplyRetry({ post }: { post: Post }) {
     retryable && post.rootId ? seatsResource(post.rootId) : null,
     0
   );
+  const responding = usePolledFetch<ChannelResponse[]>(
+    retryable ? respondingUrl(post.channelId) : null,
+    0
+  );
   const author = post.author;
   const seed =
     author.kind === 'buddy'
       ? (data?.find((seat) => seat.buddyId === author.id)?.config ?? null)
       : null;
   if (!retryable) return null;
+  const pending =
+    responding.data?.some(
+      (row) =>
+        row.threadRootId === post.rootId && author.kind === 'buddy' && row.buddyId === author.id
+    ) ?? false;
   return (
-    <HarnessPicker
-      label="Retry with model…"
-      note="Choose a model to answer the original message in this thread."
-      confirm="Retry"
-      seed={seed}
-      disabled={seed === null}
-      excluded={null}
-      buddy
-      placement="above"
-      onConfirm={(config) => retryFailedReply(post.id, config)}
-    />
+    <ReplyStatus
+      message={post.body.replace(/^Couldn[’']t reply:\s*/, '')}
+      pending={pending}
+      retry={seed ? () => retryFailedReply(post.id, seed) : undefined}
+    >
+      <HarnessPicker
+        label="Retry with model…"
+        note="Choose a model to answer the original message in this thread."
+        confirm="Retry"
+        seed={seed}
+        disabled={seed === null}
+        excluded={null}
+        buddy
+        placement="above"
+        onConfirm={(config) => retryFailedReply(post.id, config)}
+      />
+    </ReplyStatus>
   );
 }

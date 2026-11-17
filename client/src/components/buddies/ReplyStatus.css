@@ -1,0 +1,11 @@
+.channel-reply-status {
+  margin-block: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  gap: var(--sp-2);
+  font-size: var(--fs-3);
+  overflow-wrap: anywhere;
+}
+.channel-reply-status__heading {
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}

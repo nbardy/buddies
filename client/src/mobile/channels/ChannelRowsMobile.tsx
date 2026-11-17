@@ -16,7 +16,6 @@ import {
   postPurposeTag,
 } from '../../components/buddies/channel-data';
 import { channelLinkPath, postLink } from '../../components/buddies/channel-link';
-import { ReplyRetry } from '../../components/buddies/HarnessPicker';
 import type { Channel, Post } from '../../components/buddies/types';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
 
@@ -160,7 +159,6 @@ export function Row({ row, context }: { row: ChannelRow; context: RowContext }) 
               />
             </div>
             <ChannelPostContent post={row.post} directory={context.directory} toolsHost={null} />
-            <ReplyRetry post={row.post} />
             <PostFooter post={row.post} context={context} />
           </div>
         </li>
@@ -183,7 +181,6 @@ export function Row({ row, context }: { row: ChannelRow; context: RowContext }) 
               linkState={linkState}
             />
             <ChannelPostContent post={row.post} directory={context.directory} toolsHost={null} />
-            <ReplyRetry post={row.post} />
             <PostFooter post={row.post} context={context} />
           </div>
         </li>

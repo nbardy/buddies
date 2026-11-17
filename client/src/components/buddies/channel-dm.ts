@@ -11,6 +11,7 @@ import {
   type MessageBody,
   type QueuedMessage,
   bodyText,
+  isProviderRetryMessage,
 } from '@unleashd/shared';
 import type { MessageGroup } from '../../utils/chat-message-groups';
 
@@ -21,7 +22,8 @@ const GROUP_WINDOW_MS = 5 * 60_000;
 export type DmAuthor = 'owner' | 'buddy';
 
 export type DmRow =
-  | { kind: 'day' | 'notice' | 'failure'; key: string; label: string }
+  | { kind: 'day' | 'notice'; key: string; label: string }
+  | { kind: 'failure'; key: string; label: string; retrying: boolean }
   | { kind: 'lead' | 'continuation'; key: string; author: DmAuthor; at: string; body: MessageBody };
 
 const dayLabel = (date: Date) =>
@@ -40,11 +42,11 @@ function responseBody(group: Extract<MessageGroup, { type: 'assistant' }>): Mess
 }
 
 /**
- * Rows for one DM generation. System records are the turn's own failure text (the runner appends
- * one per failed turn), so each becomes a `failure` row. They were once dropped here, and a Buddy
+ * Rows for one DM generation. System records update one failure status per owner turn, removed
+ * when that turn recovers. They were once dropped here entirely, and a Buddy
  * whose CLI was missing (`spawn codex ENOENT`) showed an empty reply bubble with the reason only
  * in the server log. Guard: channel-dm.test.tsx "a failed turn shows its system message".
- * `startFailure` is the journaled `spawn_failed` attempt's message: the runner's own failure
+ * `startFailure` is the journaled failed attempt's fallback text: the runner's own failure
  * record lives only in server memory, so after a backend restart it is gone and this is all that
  * is left of a Buddy whose CLI is missing. It shows only when no failure row survived.
  * `queued` is what the owner sent that the server has not
@@ -54,7 +56,8 @@ export function dmRows(
   groups: readonly MessageGroup[],
   queued: readonly QueuedMessage[],
   boundary?: { at: Date; label: string },
-  startFailure?: string
+  startFailure?: string,
+  running = false
 ): DmRow[] {
   const rows: DmRow[] = [];
   // Fix guard: a reset belongs below its own date, even before the first message arrives.
@@ -68,7 +71,8 @@ export function dmRows(
   let previous: { author: DmAuthor; at: number; day: string } | null = null;
   const push = (key: string, author: DmAuthor, at: Date, body: MessageBody) => {
     if (body.t === 'text' && !body.text.trim()) return;
-    if (body.t === 'parts' && body.parts.length === 0) return;
+    if (body.t === 'parts' && body.parts.every((part) => part.t === 'text' && !part.text.trim()))
+      return;
     const day = at.toDateString();
     if (currentDay !== day) rows.push({ kind: 'day', key: `day:${key}`, label: dayLabel(at) });
     currentDay = day;
@@ -85,10 +89,27 @@ export function dmRows(
     });
     previous = { author, at: at.getTime(), day };
   };
+  // Pattern: fix-guards (docs/patterns.md#fix-guards)
+  // A reconnect storm rendered eleven red rows in one owner turn. Replace its one status;
+  // explicit success clears it. Guard: channel-dm retry lifecycle.
+  let failure: Extract<DmRow, { kind: 'failure' }> | null = null;
+  let ownerText: string | null = null;
+  const clearFailure = () => {
+    if (failure) rows.splice(rows.indexOf(failure), 1);
+    failure = null;
+  };
+  const failed = (key: string, label: string) => {
+    if (failure) failure.label = label;
+    else {
+      failure = { kind: 'failure', key, label, retrying: false };
+      rows.push(failure);
+    }
+  };
   for (const group of groups) {
     const first = group.messages[0];
     switch (group.type) {
       case 'assistant':
+        if (group.messages.some((m) => m.completionReason === 'success')) clearFailure();
         push(
           `m:${group.firstMessageIndex}`,
           'buddy',
@@ -99,16 +120,16 @@ export function dmRows(
       case 'single':
         switch (first.role) {
           case 'user':
+            if (bodyText(first.body) !== ownerText) failure = null;
+            ownerText = bodyText(first.body);
             push(`m:${group.firstMessageIndex}`, 'owner', new Date(first.timestamp), first.body);
             break;
-          case 'system':
-            if (bodyText(first.body).trim())
-              rows.push({
-                kind: 'failure',
-                key: `m:${group.firstMessageIndex}`,
-                label: bodyText(first.body),
-              });
+          case 'system': {
+            const text = bodyText(first.body).trim();
+            if (/^Process completed successfully\b/.test(text)) clearFailure();
+            else if (text) failed(`m:${group.firstMessageIndex}`, text);
             break;
+          }
           case 'assistant':
             break;
         }
@@ -134,7 +155,13 @@ export function dmRows(
       });
   }
   if (startFailure && !rows.some((row) => row.kind === 'failure'))
-    rows.push({ kind: 'failure', key: 'start-failure', label: startFailure });
+    failed('start-failure', startFailure);
+  const lastFailure = rows.filter((row) => row.kind === 'failure').at(-1);
+  if (lastFailure?.kind === 'failure') {
+    lastFailure.retrying = running && lastFailure === failure;
+    if (!running && isProviderRetryMessage(lastFailure.label))
+      lastFailure.label = `Connection lost. ${lastFailure.label}`;
+  }
   return rows;
 }
 
