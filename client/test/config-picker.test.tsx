@@ -84,10 +84,7 @@ test('Codex picker shows the latest version of each family, including minor rele
       {
         ...codex,
         defaultModelId: 'gpt-6.10-sol',
-        models: [
-          ...codex.models,
-          { id: 'gpt-6.10-sol', displayName: 'GPT-6.10 Sol' },
-        ],
+        models: [...codex.models, { id: 'gpt-6.10-sol', displayName: 'GPT-6.10 Sol' }],
       },
     ],
   });
