@@ -71,12 +71,12 @@ test('Codex picker shows the latest version of each family, including minor rele
   const html = renderToStaticMarkup(
     <ConversationConfigPicker value={value} catalog={current} onChange={() => {}} />
   );
-  assert.match(html, /GPT-6\.1 Sol/);
-  assert.doesNotMatch(html, /GPT-6 Sol|GPT-5\.6 Sol/);
-  assert.match(html, /GPT-6 Astra/);
+  assert.match(html, /GPT-6\.2 Sol/);
+  assert.doesNotMatch(html, /GPT-6\.1 Sol|GPT-6 Sol|GPT-5\.6 Sol|GPT-6 Astra/);
+  assert.match(html, /GPT-6\.2 Astra/);
   assert.match(html, /GPT-6 Luna/);
-  const selectedSol = html.match(/<input[^>]*value="explicit:gpt-6\.1-sol"[^>]*>/)?.[0] ?? '';
-  assert.match(selectedSol, /checked=""/);
+  const selectedAstra = html.match(/<input[^>]*value="explicit:gpt-6\.2-astra"[^>]*>/)?.[0] ?? '';
+  assert.match(selectedAstra, /checked=""/);
 
   const nextCatalog = ProviderCatalogSchema.parse({
     revision: 'next',
@@ -87,7 +87,6 @@ test('Codex picker shows the latest version of each family, including minor rele
         models: [
           ...codex.models,
           { id: 'gpt-6.10-sol', displayName: 'GPT-6.10 Sol' },
-          { id: 'gpt-6.2-sol', displayName: 'GPT-6.2 Sol' },
         ],
       },
     ],
@@ -97,7 +96,7 @@ test('Codex picker shows the latest version of each family, including minor rele
   )!.choices;
   assert.deepEqual(
     choices.map((choice) => choice.key),
-    ['explicit:gpt-6-astra', 'explicit:gpt-6-luna', 'explicit:gpt-6.10-sol']
+    ['explicit:gpt-6.2-astra', 'explicit:gpt-6-luna', 'explicit:gpt-6.10-sol']
   );
   assert.equal(choices.find((choice) => choice.selected)?.key, 'explicit:gpt-6.10-sol');
 });
