@@ -885,8 +885,14 @@ export function ChannelBrowser({
               onConversation={openDm}
             />
           ),
-          expedition: (id) => (
-            <ExpeditionView key={id} id={id} workspaceId={workspaceId} frame="desktop" />
+          expedition: ({ id, conversationId }) => (
+            <ExpeditionView
+              key={id}
+              id={id}
+              conversationId={conversationId}
+              workspaceId={workspaceId}
+              frame="desktop"
+            />
           ),
           threads: () => (
             <ThreadsPane
@@ -955,7 +961,7 @@ type MainPanes = {
   home(): ReactNode;
   workers(buddyId: string): ReactNode;
   dm(conversationId: string): ReactNode;
-  expedition(id: string): ReactNode;
+  expedition(view: Extract<ChannelsView, { kind: 'expedition' }>): ReactNode;
   threads(): ReactNode;
   channel(): ReactNode;
   task(taskId: string, channelId: string): ReactNode;
@@ -971,7 +977,7 @@ function mainPane(view: ChannelsView, panes: MainPanes): ReactNode {
     case 'dm':
       return panes.dm(view.conversationId);
     case 'expedition':
-      return panes.expedition(view.id);
+      return panes.expedition(view);
     case 'threads':
       return panes.threads();
     case 'task':

@@ -653,7 +653,8 @@ a.channel-browser-buddy-done {
   margin-bottom: var(--sp-3);
 }
 
-.channel-browser-rail-section-row:not(:first-child) {
+.channel-browser-rail-section-row:not(:first-child),
+.channel-browser-rail-scroll > .expedition-rail {
   margin-top: var(--sp-8);
 }
 

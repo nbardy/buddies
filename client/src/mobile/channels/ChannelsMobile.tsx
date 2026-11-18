@@ -127,6 +127,7 @@ function renderScreen(screen: ChannelsView, context: ScreenContext) {
         <ExpeditionView
           key={screen.id}
           id={screen.id}
+          conversationId={screen.conversationId}
           workspaceId={context.workspaceId}
           frame="mobile"
         />
@@ -416,6 +417,7 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
 // Desktop's rail Expeditions section as touch rows.
 const MOBILE_ROW: RailRowClasses = {
   section: 'mobile-ui-section',
+  headingRow: 'ui-section__header',
   heading: 'ui-section__title',
   list: 'mobile-channels-list',
   row: 'mobile-channels-row ui-row',

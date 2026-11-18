@@ -22,6 +22,7 @@ export function registerExpeditionRoutes(app: Express, host: Expeditions) {
   route('post', '/launch', (req) => {
     return host.launch(buddyMutations['expedition.launch'].body.parse(req.body));
   });
+  route('post', '/:id/discussion', (req) => host.discussion(String(req.params.id)));
   route('post', '/:id/answer', (req) => {
     const p = z
       .object({ key: z.string(), value: z.union([z.string(), z.boolean()]) })

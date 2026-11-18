@@ -348,8 +348,9 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   live in `client/src/components/buddies/buddy-tabs.ts` (pure, mobile-safe).
   Tab strips are `<Link>`s so Back returns to the previous tab instead of
   leaving the buddy, and a tab survives reload.
-- Any "open this conversation" affordance must be a `<Link to={/chat/:id}>`
-  AND availability-checked against `listField('idSet')` (the one
+- Any "open this conversation" affordance must be a `<Link>` to its owning
+  surface (`/chat/:id` for general chats, the workspace Channels route for DMs
+  and expedition step transcripts) and availability-checked against `listField('idSet')` (the one
   Set in the list index; never a per-component
   `new Set(ids)` memo). Deleting a
   conversation only terminalises its buddy link row, and an automation run

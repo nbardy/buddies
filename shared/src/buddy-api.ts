@@ -12,7 +12,11 @@ import type {
 import { z } from 'zod';
 import { OwnerPostMentionConfigSchema } from './buddy-channel-posts.js';
 import { type ConversationConfig, ConversationConfigSchema } from './conversation-config.js';
-import { ExpeditionProposal, type ExpeditionView } from './expedition.js';
+import {
+  type ExpeditionDiscussion,
+  ExpeditionProposal,
+  type ExpeditionView,
+} from './expedition.js';
 import type { UpstreamUpdateResult } from './upstream.js';
 
 // Pattern: one-type-source (docs/patterns.md#one-type-source)
@@ -365,6 +369,12 @@ export const buddyMutations = {
     status: 200,
     body: z.object({ key: z.string(), value: z.union([z.string(), z.boolean()]) }).strict(),
   },
+  'expedition.discussion': {
+    method: 'POST',
+    path: '/api/buddies/expeditions/:id/discussion',
+    status: 200,
+    body: NoBodySchema,
+  },
 } as const;
 
 export type BuddyMutation = keyof typeof buddyMutations;
@@ -372,7 +382,7 @@ export type BuddyMutation = keyof typeof buddyMutations;
  * (server/src/upstream, server/src/expedition). */
 export type BuddyRouteMutation = Exclude<
   BuddyMutation,
-  'upstream.update' | 'expedition.launch' | 'expedition.answer'
+  'upstream.update' | 'expedition.launch' | 'expedition.answer' | 'expedition.discussion'
 >;
 type Contract<K extends BuddyMutation> = (typeof buddyMutations)[K];
 export type BuddyMutationBody<K extends BuddyMutation> = z.input<Contract<K>['body']>;
@@ -431,6 +441,7 @@ export interface BuddyMutationResults {
   'upstream.update': UpstreamUpdateResult;
   'expedition.launch': ExpeditionView;
   'expedition.answer': ExpeditionView;
+  'expedition.discussion': ExpeditionDiscussion;
 }
 export type BuddyMutationRoute<K extends BuddyMutation> =
   `${Contract<K>['method']} ${Contract<K>['status']} ${Contract<K>['path']}`;

@@ -12,7 +12,7 @@
  *   D = Home (channel list + Buddies) ⊕ Landing (the workspace Home) ⊕ Threads ⊕ Channel ⊕ Thread ⊕ Task ⊕ DM ⊕ Workers
  *       ⊕ Expedition
  *
- * `expedition` (`?expedition=`) opens the view of ExpeditionView.tsx.
+ * `expedition` opens a run; `conversation` selects a step transcript within that run.
  *
  * `dm` is a Buddy DM conversation drawn as a thread (493c1c7). It wins over the other params,
  * which stay in the URL so Back (dropping `dm`) returns to the screen the DM was opened from.
@@ -26,7 +26,7 @@ export type ChannelsView =
   | { kind: 'task'; channelId: string; taskId: string }
   | { kind: 'dm'; conversationId: string }
   | { kind: 'workers'; buddyId: string }
-  | { kind: 'expedition'; id: string };
+  | { kind: 'expedition'; id: string; conversationId?: string };
 
 export function channelsView(search: string): ChannelsView {
   const params = new URLSearchParams(search);
@@ -36,7 +36,10 @@ export function channelsView(search: string): ChannelsView {
   const workers = params.get('workers');
   if (workers) return { kind: 'workers', buddyId: workers };
   const expedition = params.get('expedition');
-  if (expedition) return { kind: 'expedition', id: expedition };
+  if (expedition) {
+    const conversationId = params.get('conversation');
+    return { kind: 'expedition', id: expedition, ...(conversationId ? { conversationId } : {}) };
+  }
   const dm = params.get('dm');
   if (dm) return { kind: 'dm', conversationId: dm };
   if (params.get('view') === 'home') return { kind: 'landing' };
@@ -72,6 +75,6 @@ export function channelsHref(workspaceId: string, screen: ChannelsView): string 
     case 'dm':
       return `${base}?dm=${encodeURIComponent(screen.conversationId)}`;
     case 'expedition':
-      return `${base}?expedition=${encodeURIComponent(screen.id)}`;
+      return `${base}?expedition=${encodeURIComponent(screen.id)}${screen.conversationId ? `&conversation=${encodeURIComponent(screen.conversationId)}` : ''}`;
   }
 }

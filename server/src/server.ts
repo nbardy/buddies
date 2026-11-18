@@ -74,7 +74,7 @@ import { replaceRuntimeConfig } from './conversations/runtime-config';
 import { devPorts } from './dev-ports';
 import { modelOf } from './expedition/call';
 import { createExpeditions } from './expedition/engine';
-import { manager } from './expedition/manager';
+import { manager, managerDiscussion } from './expedition/manager';
 import { registerExpeditionRoutes } from './expedition/routes';
 import { registerConversationRoutes } from './http/conversation-routes';
 import { registerCoreRoutes } from './http/core-routes';
@@ -374,6 +374,7 @@ const expeditions = createExpeditions({
     };
   },
   wake: manager(buddiesCore, buddyEvents),
+  openDiscussion: managerDiscussion(buddiesCore, buddyEvents),
 });
 const buddyMcpSpec = (grant: Parameters<McpEndpoint['spec']>[0]) => {
   if (!buddyMcp) throw new Error('The Buddy MCP endpoint is not started');

@@ -5,8 +5,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import type { Post } from '@unleashd/buddies-core';
 import {
   EXPEDITION_PROPOSAL,
+  type ExpeditionDiscussion,
   ExpeditionProposal,
   type ExpeditionView,
   WS_PATH,
@@ -43,12 +45,18 @@ async function main(){
  const done=text=>{out(text);if(!codex)say({type:'assistant',message:{content:[],usage:{input_tokens:10,output_tokens:2,cache_read_input_tokens:0,cache_creation_input_tokens:0}}});say(codex?{type:'turn.completed',usage:{input_tokens:10,output_tokens:2}}:{type:'result',subtype:'success',result:text});};
  say(codex?{type:'thread.started',thread_id:'fake-'+Date.now()}:{type:'system',subtype:'init',session_id:'fake-'+Date.now()});
  const manager=/Expedition ([a-f0-9-]+) needs your decision: (rewrite|stop|propose)/.exec(prompt);
- if(manager&&(manager[2]!=='rewrite'||!fs.existsSync(path.join(fake,'rewritten')))){
+ const discussion=/Discussion proof (first|second) \([^,]+, thread ([^,]+), channel ([^)]+)\)/.exec(prompt);
+ if(discussion||(manager&&(manager[2]!=='rewrite'||!fs.existsSync(path.join(fake,'rewritten'))))){
   const {Client}=require(process.env.SDK_CLIENT),{StreamableHTTPClientTransport}=require(process.env.SDK_HTTP);
   const spec=Object.values(JSON.parse(process.argv[process.argv.indexOf('--mcp-config')+1]).mcpServers)[0];
   const headers=Object.fromEntries(Object.entries(spec.headers).map(([k,v])=>[k,v.replace(/\$\{([^}]+)\}/g,(_,n)=>process.env[n])]));
   const client=new Client({name:'fake-manager',version:'1'});
   await client.connect(new StreamableHTTPClientTransport(new URL(spec.url),{requestInit:{headers}}));
+  if(discussion){
+   if(discussion[1]==='first')fs.writeFileSync(path.join(fake,'discussion-prompt'),prompt);
+   await client.callTool({name:'post',arguments:{channel:{id:discussion[3]},replyToId:discussion[2],body:'Discussion answer '+discussion[1],key:'discussion-'+discussion[1]}});
+   await client.close();done('Replied');return;
+  }
   if(manager[2]==='propose'){
    const {actions,result}=JSON.parse(fs.readFileSync(path.join(fake,'propose.json'),'utf8'));
    const replies=[];for(const action of actions)replies.push(await client.callTool({name:'expedition',arguments:{action}}));
@@ -86,9 +94,13 @@ async function main(){
  done(text);
 }
 `;
-async function api<T = { id: string }>(url: string, body?: unknown): Promise<T> {
+async function api<T = { id: string }>(
+  url: string,
+  body?: unknown,
+  method = body ? 'POST' : 'GET'
+): Promise<T> {
   const res = await fetch(`http://127.0.0.1:${port}${url}`, {
-    method: body ? 'POST' : 'GET',
+    method,
     headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   }).catch((cause: unknown) => {
@@ -320,6 +332,49 @@ test('real backend: fan-out, restart adoption, checkout judges, question, rewrit
   );
   await eventually(async () => (await view(stopped.id)).status === 'stopped', 'manager stop');
   assert.deepEqual((await view(stopped.id)).questions, [], 'stopped questions cannot be answered');
+});
+
+test('a completed expedition keeps one manager thread across refresh and restart', {
+  timeout: 120000,
+}, async () => {
+  const run = await launch(
+    plan("one:{by:'claude:claude-haiku-5-5:low',brief:'TAG:discussion'}", 'return await s.one();')
+  );
+  await eventually(async () => (await view(run.id)).status === 'met', 'expedition completed');
+  assert.equal((await view(run.id)).discussion, undefined);
+  const open = () =>
+    api<ExpeditionDiscussion>(`/api/buddies/expeditions/${run.id}/discussion`, undefined, 'POST');
+  const [thread, duplicate] = await Promise.all([open(), open()]);
+  assert.deepEqual(duplicate, thread);
+  assert.equal(run.managerId, buddyId);
+  const page = () =>
+    api<{ root: Post; posts: Post[] }>(`/api/buddies/posts/${thread.rootId}/thread`);
+  assert.equal((await page()).posts.length, 0, 'opening a discussion does not start a turn');
+  const ask = async (which: 'first' | 'second') => {
+    await api(`/api/buddies/channels/${thread.channelId}/posts`, {
+      body: `Discussion proof ${which}`,
+      replyToId: thread.rootId,
+      key: `owner-discussion-${which}`,
+    });
+    await eventually(
+      async () => (await page()).posts.some((post) => post.body === `Discussion answer ${which}`),
+      `manager answered ${which} on the expedition thread`
+    );
+    return (await page()).posts.find((post) => post.body === `Discussion answer ${which}`)!;
+  };
+  const first = await ask('first');
+  assert.match(
+    fs.readFileSync(path.join(fake, 'discussion-prompt'), 'utf8'),
+    /Discussion for expedition/
+  );
+  await kill();
+  await start();
+  assert.deepEqual((await view(run.id)).discussion, thread);
+  assert.deepEqual(await open(), thread);
+  const second = await ask('second');
+  assert.deepEqual(second.author, { kind: 'buddy', id: buddyId });
+  assert.ok(first.conversationId);
+  assert.equal(second.conversationId, first.conversationId);
 });
 
 test('owner Stop cancels a step and wakes its manager', { timeout: 120000 }, async () => {

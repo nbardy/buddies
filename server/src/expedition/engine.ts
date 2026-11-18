@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type {
+  ExpeditionDiscussion,
   ExpeditionProposal,
   ExpeditionQuestion,
   ExpeditionStep,
@@ -48,6 +49,7 @@ type Entry =
   | { t: 'start'; call: Call; hash: string }
   | { t: 'result'; key: string; hash: string; receipt: Receipt }
   | { t: 'wake'; key: string; cost: number }
+  | { t: 'discussion'; thread: ExpeditionDiscussion }
   | ({ t: 'question'; revision?: Revision } & ExpeditionQuestion)
   | { t: 'answer'; key: string; value: unknown }
   | { t: 'status'; status: ExpeditionView['status']; reason?: string };
@@ -60,6 +62,7 @@ class Run {
   readonly answers = new Map<string, Extract<Entry, { t: 'answer' }>>();
   readonly wakes = new Map<string, number>();
   readonly versions: number[] = [];
+  discussion?: ExpeditionDiscussion;
   status: Extract<Entry, { t: 'status' }> = { t: 'status', status: 'running' };
   readonly active = new Map<string, { abort: AbortController; done: Promise<Receipt> }>();
   readonly waiters = new Map<string, (v: unknown) => void>();
@@ -98,6 +101,9 @@ class Run {
       case 'wake':
         this.wakes.set(e.key, e.cost);
         break;
+      case 'discussion':
+        this.discussion = e.thread;
+        break;
       case 'question':
         this.questions.set(e.key, e);
         break;
@@ -119,6 +125,12 @@ export function createExpeditions(
     root: string;
     gate: ExecutionGate;
     wake(id: string, buddyId: string, question: string, folder: string, key: string): Promise<void>;
+    openDiscussion?(
+      id: string,
+      workspaceId: string,
+      buddyId: string,
+      folder: string
+    ): Promise<ExpeditionDiscussion>;
   }
 ) {
   const runs = new Map<string, Run>();
@@ -192,6 +204,7 @@ export function createExpeditions(
     return {
       id,
       workspaceId: r.launch.workspaceId,
+      managerId: r.launch.contract.leader.slice(6),
       goal: r.launch.contract.goal,
       budget: r.launch.contract.budget,
       status: r.status.status,
@@ -204,6 +217,7 @@ export function createExpeditions(
           ? []
           : [...r.questions.values()].map(({ key, question, kind }) => ({ key, question, kind })),
       versions: r.versions,
+      discussion: r.discussion,
     };
   }
   async function question(
@@ -430,6 +444,16 @@ export function createExpeditions(
   return {
     allowed,
     view,
+    async discussion(id: string) {
+      allowed();
+      const r = get(id);
+      if (r.discussion) return r.discussion;
+      if (!d.openDiscussion) throw new Error('Expedition discussions are unavailable');
+      const { contract, workspaceId } = r.launch;
+      const thread = await d.openDiscussion(id, workspaceId, contract.leader.slice(6), r.folder);
+      if (!r.discussion) append(r, { t: 'discussion', thread });
+      return thread;
+    },
     rows: () => [...runs.keys()].map(view),
     async boot() {
       if (!fs.existsSync(d.root)) return;

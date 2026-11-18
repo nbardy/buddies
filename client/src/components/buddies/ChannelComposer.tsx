@@ -78,31 +78,44 @@ const NO_SEATS: ThreadSeats = { kind: 'loaded', seats: [] };
 // 'button' (touch — Return is a newline, as in Slack mobile; Send sends).
 export type ComposerSubmit = 'enter' | 'button';
 
-export function ChannelComposer({
-  channelId,
-  placeholder,
-  rootId,
-  references,
-  autoFocus = false,
-  submit,
-  mentionPlacement = 'above',
-  onPosted,
-  editPost,
-  onCancel,
-}: {
-  channelId: string;
-  placeholder: string;
-  /** The thread this composer replies in; null posts at the top level. */
-  rootId: string | null;
-  references: readonly ChannelReference[];
-  /** Focus the textarea on mount: the desktop thread pane, opened by a Reply click. */
-  autoFocus?: boolean;
-  submit: ComposerSubmit;
-  mentionPlacement?: 'above' | 'below';
-  onPosted(result: PostResult): void;
-  editPost?: Post;
-  onCancel?(): void;
-}) {
+export function ChannelComposer(
+  props: (
+    | {
+        channelId: string;
+        prepareDestination?: undefined;
+      }
+    | {
+        channelId: null;
+        prepareDestination(): Promise<{ channelId: string; rootId: string }>;
+        draftId: string;
+      }
+  ) & {
+    draftId?: string;
+    placeholder: string;
+    /** The thread this composer replies in; null posts at the top level. */
+    rootId: string | null;
+    references: readonly ChannelReference[];
+    /** Focus the textarea on mount: the desktop thread pane, opened by a Reply click. */
+    autoFocus?: boolean;
+    submit: ComposerSubmit;
+    mentionPlacement?: 'above' | 'below';
+    onPosted(result: PostResult): void;
+    editPost?: Post;
+    onCancel?(): void;
+  }
+) {
+  const {
+    channelId,
+    placeholder,
+    rootId,
+    references,
+    autoFocus = false,
+    submit,
+    mentionPlacement = 'above',
+    onPosted,
+    editPost,
+    onCancel,
+  } = props;
   // The draft: the post body in its stored Markdown form. `view` is what the textarea shows.
   const [raw, setRaw] = useState(editPost?.body ?? '');
   const [saving, setSaving] = useState(false);
@@ -126,7 +139,11 @@ export function ChannelComposer({
   const viewRef = useRef(view);
   viewRef.current = view;
   const draft = useConversationDraft({
-    conversationId: editPost ? `edit-post:${editPost.id}` : channelDraftId(channelId, rootId),
+    conversationId: editPost
+      ? `edit-post:${editPost.id}`
+      : props.channelId === null
+        ? props.draftId
+        : (props.draftId ?? channelDraftId(props.channelId, rootId)),
     textareaRef,
     controlled: true,
     autoFocus,
@@ -276,7 +293,11 @@ export function ChannelComposer({
     setUploading((count) => count + 1);
     const form = new FormData();
     for (const file of files) form.append('files', file);
-    void buddyUpload(channelId, form)
+    const uploaded =
+      props.channelId === null
+        ? props.prepareDestination().then(({ channelId }) => buddyUpload(channelId, form))
+        : buddyUpload(props.channelId, form);
+    void uploaded
       .then((result) => insertAtCaret(result.files.map(mediaMarkdown).join('\n')))
       .catch((cause: unknown) => setProblem(errorText(cause)))
       .finally(() => setUploading((count) => count - 1));
@@ -286,7 +307,7 @@ export function ChannelComposer({
   // the moment Send is pressed; waiting for the POST made Send feel broken
   // whenever the server was busy. A failed POST takes the post back out and
   // returns the text, unless the owner has already started a new message.
-  const send = () => {
+  const send = async () => {
     const body = sendBody(view, roster);
     if (
       !body ||
@@ -316,12 +337,25 @@ export function ChannelComposer({
       choice.kind === 'chosen' ? [{ buddyId: buddy.id, config: choice.config }] : []
     );
     const unsent = { raw: view.raw, choices };
+    let target: { channelId: string; rootId: string | null };
+    if (props.channelId === null) {
+      setSaving(true);
+      setProblem(null);
+      try {
+        target = await props.prepareDestination();
+      } catch (cause) {
+        setProblem(errorText(cause));
+        return;
+      } finally {
+        setSaving(false);
+      }
+    } else target = { channelId: props.channelId, rootId };
     const key = newId();
     outboxSending({
       kind: 'sending',
       key,
-      channelId,
-      rootId,
+      channelId: target.channelId,
+      rootId: target.rootId,
       body,
       createdAt: new Date().toISOString(),
     });
@@ -333,8 +367,8 @@ export function ChannelComposer({
     setProblem(null);
     void buddyWrite(
       'channel.post',
-      { channelId },
-      { key, body, mentionConfigs, ...(rootId === null ? {} : { replyToId: rootId }) }
+      { channelId: target.channelId },
+      { key, body, mentionConfigs, ...(target.rootId === null ? {} : { replyToId: target.rootId }) }
     )
       .then((result) => {
         outboxSent(key, result.post);
@@ -440,6 +474,7 @@ export function ChannelComposer({
           className={text.length > 0 ? 'channel-composer-mirrored' : undefined}
           rows={1}
           value={text}
+          readOnly={channelId === null && saving}
           placeholder={placeholder}
           aria-label={placeholder}
           onScroll={(event) => {
@@ -497,7 +532,7 @@ export function ChannelComposer({
               !event.nativeEvent.isComposing
             ) {
               event.preventDefault();
-              send();
+              void send();
             }
           }}
         />

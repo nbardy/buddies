@@ -4,6 +4,12 @@ One TypeScript plan runs a chain of agent turns, host commands and questions. A 
 it; the owner launches its card. Its manager is the Buddy in `contract.leader`, with that Buddy's
 normal tools and memory. The [ten examples](examples/README.md) are the authoring contract.
 
+Open an expedition from the workspace Channels rail to chat with its manager. The first send or
+attachment creates one private thread in the owner's DM with the manager and records its reference
+in the expedition log. Follow-ups use the same thread after completion or a server restart.
+Owner decisions appear above the composer. Attempts opens a step transcript inside the workspace.
+Goal shows the full brief, and Details shows spend, budget, plan versions and the run's status reason.
+
 The base is `origin/HEAD` after a bounded fetch (or `HEAD`, explicitly disclosed, if absent), overridden by `contract.base`; the Launch card pins its commit and reports the ref and fetch result in the launch log too.
 `propose {file:'repo/path',at:'base'}` gates a temporary copy from the workspace repository's base commit and carries that exact source and hash on the card, without writing into the shared checkout.
 

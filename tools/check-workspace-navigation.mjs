@@ -64,6 +64,27 @@ try {
         `getComputedStyle(document.querySelector('.channel-browser-channels button')).columnGap`
       );
       assert.ok(Number.parseFloat(gap) <= 4, `Channel hash spacing grew: ${gap}`);
+      // A paragraph-length LOFT goal once pushed its status more than 3,000 px past the rail.
+      const expeditionRail = await session.evaluate(`(() => {
+        const section = document.querySelector('section[aria-label="Expeditions"]');
+        if (!section) return null;
+        const headings = [...document.querySelectorAll('.channel-browser-rail-section')];
+        return {
+          left: headings.map(h => h.getBoundingClientRect().left),
+          right: section.getBoundingClientRect().right,
+          rows: [...section.querySelectorAll('button')].map(b => b.getBoundingClientRect().right),
+        };
+      })()`);
+      if (expeditionRail) {
+        assert.ok(
+          Math.max(...expeditionRail.left) - Math.min(...expeditionRail.left) <= 1,
+          'Channels, Expeditions and Buddies headings should align'
+        );
+        assert.ok(
+          expeditionRail.rows.every((right) => right <= expeditionRail.right + 1),
+          'Long expedition goals must leave their status visible inside the rail'
+        );
+      }
       console.log(
         `Desktop: ${rows.length} Buddy rows fit the rail at 26px or less; hash gap ${gap}`
       );

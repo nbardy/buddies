@@ -251,7 +251,7 @@ async function discoverConversation(baseUrl, token) {
 
 /**
  * Expeditions to shoot: the live one that
- * shows the most (waiting on the owner first, then running), and a finished one. Each opens in the
+ * shows the most (waiting on the owner first, then running), a finished one, and a step transcript. Each opens in the
  * workspace it was launched in. A backend without the route (404: older code) has none.
  */
 async function discoverExpeditions(api) {
@@ -262,9 +262,11 @@ async function discoverExpeditions(api) {
   const placed = rows;
   const pick = (row) => (row ? { id: row.id, workspaceId: row.workspaceId } : null);
   const live = placed.filter((row) => !['met', 'stopped'].includes(row.status));
+  const withSteps = placed.find((row) => row.steps.some((step) => step.conversationId));
   return {
     expeditionLive: pick(live.find((row) => row.questions.length) ?? live[0]),
     expeditionFinished: pick(placed.find((row) => ['met', 'stopped'].includes(row.status))),
+    expeditionWithSteps: pick(withSteps),
   };
 }
 
@@ -745,6 +747,19 @@ export function buildScreens(found, focus) {
       missing: found.expeditionFinished ? null : 'no finished expedition with a workspace',
       settleMs: 1000,
       views: onBoth(expeditionPath(found.expeditionFinished)),
+    },
+    {
+      name: 'expedition-step',
+      missing: found.expeditionWithSteps ? null : 'no expedition with a step conversation',
+      views: onBoth(
+        `${expeditionPath(found.expeditionWithSteps)}&tab=attempts`,
+        prep(`
+          const link = document.querySelector('.expedition-step a[href*="&conversation="]');
+          if (!link) return 'SKIP';
+          link.click();
+          await tick(1000);
+          return has('[aria-label="Step transcript"]');`)
+      ),
     },
     {
       name: 'landing-mentions',

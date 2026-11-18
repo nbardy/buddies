@@ -39,9 +39,11 @@ export type ExpeditionQuestion = {
   question: string;
   kind: 'text' | 'confirm' | 'manager';
 };
+export type ExpeditionDiscussion = { channelId: string; rootId: string };
 export type ExpeditionView = {
   id: string;
   workspaceId: string;
+  managerId: string;
   status: 'running' | 'held' | 'met' | 'stopped';
   goal: string;
   budget: { usd: number; hours: number };
@@ -50,5 +52,6 @@ export type ExpeditionView = {
   steps: ExpeditionStep[];
   questions: ExpeditionQuestion[];
   versions: number[];
+  discussion?: ExpeditionDiscussion;
   reason?: string;
 };
