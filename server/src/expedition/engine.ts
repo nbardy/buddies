@@ -224,7 +224,16 @@ export function createExpeditions(
         if (v.spend + v.reserved + cost > v.budget.usd) return waiting;
         append(r, { t: 'wake', key, cost });
       }
-      await d.wake(r.id, r.launch.contract.leader.slice(6), question, r.folder, key);
+      try {
+        await d.wake(r.id, r.launch.contract.leader.slice(6), question, r.folder, key);
+      } catch (error) {
+        // Keep this run actionable if delivery fails during recovery. Other runs must still boot.
+        append(r, {
+          t: 'status',
+          status: 'held',
+          reason: `Could not notify the expedition manager: ${String(error)}`,
+        });
+      }
     }
     return waiting;
   }

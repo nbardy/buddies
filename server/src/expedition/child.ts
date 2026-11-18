@@ -55,10 +55,16 @@ export function runPlan(
     if (ended) return;
     if (m.t === 'waiting') clearTimeout(timer);
     receive(m, (result) => {
-      if (child.connected) {
+      // A rewrite can retire the plan while a question or step is returning; IPC disconnect is asynchronous.
+      if (!ended && child.connected) {
         clearTimeout(timer);
         timer = setTimeout(labelled('expedition-plan-limit', expired), 30_000);
-        child.send({ seq: 'seq' in m ? m.seq : 0, result });
+        child.send({ seq: 'seq' in m ? m.seq : 0, result }, (error) => {
+          if (error && !ended) {
+            kill();
+            receive({ t: 'error', why: `Plan reply failed: ${error.message}` }, () => {});
+          }
+        });
       }
     });
     if (m.t === 'end' || m.t === 'error') kill();

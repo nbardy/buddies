@@ -91,6 +91,8 @@ async function api<T = { id: string }>(url: string, body?: unknown): Promise<T> 
     method: body ? 'POST' : 'GET',
     headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
+  }).catch((cause: unknown) => {
+    throw new Error(`Test backend unavailable at ${url}\n${logs.slice(-2500)}`, { cause });
   });
   const value = await res.json();
   assert.ok(res.ok, JSON.stringify(value));

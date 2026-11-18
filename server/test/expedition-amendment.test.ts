@@ -29,7 +29,9 @@ test('owner amends a waiting run after restart; its old final prompt, spend and 
     createExpeditions({
       root,
       gate: { t: 'enabled' },
-      wake: async () => {},
+      wake: async () => {
+        throw new Error('manager delivery failed');
+      },
       cancelTurn: async () => {},
       resolve: async () => ({ provider: 'codex', model: 'gpt-6.2-sol', effort: 'low' }),
       runTurn: async (r) => {
@@ -120,15 +122,18 @@ plan:async(s,x)=>{const a=await s.first();${body}}});`;
   h.answer(id, followup.key, false);
   assert.deepEqual(h.view(id), v);
   assert.deepEqual(await amend(closedFollowup), { issues: ['Owner declined this rewrite'] });
-  await amend(source(next, 'await s.second(); return a;'));
+  await amend(source(next, "await s.second(); await x.checkin('Finish follow-up'); return a;"));
   const accepted = h.view(id).questions[0]!;
   await h.close();
   h = host();
   await h.boot();
   assert.equal(h.view(id).status, 'met');
   h.answer(id, accepted.key, true);
+  await until(() => h.view(id).reason?.includes('manager delivery failed') === true);
+  assert.equal(h.view(id).status, 'held');
+  await h.act(id, 'manager', 'continue', 'Finish follow-up');
   await until(() => h.view(id).status === 'met');
-  assert.equal(h.view(id).spend, v.spend);
+  assert.equal(h.view(id).spend, v.spend + 0.25);
   assert.deepEqual(h.view(id).versions, [1, 2, 3, 4]);
   assert.equal(work.length, 2);
 });
