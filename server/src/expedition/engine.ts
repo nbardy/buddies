@@ -21,6 +21,7 @@ export const hash = (value: unknown) =>
 const revisable = ['goal', 'rules', 'done', 'autoApply'] as const;
 type Revision = {
   from: number;
+  reopen?: boolean;
   hash: string;
   contract: Contract;
   why: string;
@@ -106,6 +107,9 @@ class Run {
         break;
       case 'status':
         this.status = e;
+        // A proposal made while running cannot silently become approval to reopen a finished run.
+        if (e.status === 'met')
+          for (const [key, q] of this.questions) if (q.revision) this.questions.delete(key);
         break;
     }
   }
@@ -372,8 +376,14 @@ export function createExpeditions(
     append(r, { t: 'status', status: 'met' });
   }
   function install(r: Run, revision: Revision, source: string, approval?: string) {
-    if (revision.from !== r.versions.at(-1) || ['met', 'stopped'].includes(r.status.status))
+    if (
+      revision.from !== r.versions.at(-1) ||
+      r.status.status === 'stopped' ||
+      (r.status.status === 'met' && !(revision.reopen && approval))
+    )
       throw new Error('This revision is stale');
+    if (revision.reopen && Date.now() >= r.launch.at + r.launch.contract.budget.hours * 3600000)
+      throw new Error('The original expedition deadline has passed');
     if (hash(source) !== revision.hash)
       throw new Error('Revision source does not match its approval');
     const version = revision.from + 1;
@@ -462,7 +472,8 @@ export function createExpeditions(
       allowed();
       const r = get(id),
         q = r.questions.get(key);
-      if (['met', 'stopped'].includes(r.status.status)) throw new Error('Expedition is finished');
+      if (r.status.status === 'stopped' || (r.status.status === 'met' && !q?.revision?.reopen))
+        throw new Error('Expedition is finished');
       if (
         !q ||
         q.kind === 'manager' ||
@@ -486,7 +497,11 @@ export function createExpeditions(
       const r = get(id);
       if (r.launch.contract.leader !== `buddy:${buddyId}`)
         throw new Error('Only the manager may act');
-      if (['met', 'stopped'].includes(r.status.status)) throw new Error('Expedition is finished');
+      const reopen = r.status.status === 'met';
+      if (r.status.status === 'stopped' || (reopen && action !== 'rewrite'))
+        throw new Error('Expedition is finished');
+      if (reopen && Date.now() >= r.launch.at + r.launch.contract.budget.hours * 3600000)
+        throw new Error('The original expedition deadline has passed');
       if (action === 'rewrite') {
         const from = r.versions.at(-1)!;
         const file = path.join(r.folder, 'plan.expedition.ts'),
@@ -522,23 +537,26 @@ export function createExpeditions(
               'The owner contract changed outside goal, rules, done or autoApply. Keep the original budget, deadline, repository and manager.',
             ],
           };
+        const statusAfterGates = view(id).status;
         if (
           fs.readFileSync(file, 'utf8') !== source ||
           from !== r.versions.at(-1) ||
-          ['met', 'stopped'].includes(r.status.status)
+          (statusAfterGates === 'met') !== reopen ||
+          statusAfterGates === 'stopped'
         )
           return { issues: ['Plan or run changed during gates'] };
         const extra = checked.preview.costUsd;
         const changed = revisable.filter((k) => hash(original[k]) !== hash(next[k]));
         const revision: Revision = {
           from,
+          reopen,
           hash: hash(source),
           why,
           contract: next,
           keep: checked.calls.map((c) => hash([r.id, c.key, hash(c)])),
         };
-        if (changed.length || extra > original.autoApply.usd) {
-          const key = `rewrite/${from}/${revision.hash}`;
+        if (reopen || changed.length || extra > original.autoApply.usd) {
+          const key = `rewrite/${from}/${reopen ? 'follow-up/' : ''}${revision.hash}`;
           if (r.answers.get(key)?.value === false)
             return { issues: ['Owner declined this rewrite'] };
           if (!r.questions.has(key)) {
@@ -549,7 +567,7 @@ export function createExpeditions(
                 : `${k}: ${JSON.stringify(original[k])} → ${JSON.stringify(next[k])}`
             );
             const prompt = [
-              `Revise this expedition in place? ${why}`,
+              `${reopen ? 'Reopen this completed expedition for a follow-up?' : 'Revise this expedition in place?'} ${why}`,
               `Next steps: ${checked.calls.map((c) => c.key).join(', ') || 'none'}. Up to $${extra} within the existing $${v.budget.usd} ceiling ($${v.spend} booked, $${v.reserved} reserved).`,
               ...differences,
             ].join('\n');

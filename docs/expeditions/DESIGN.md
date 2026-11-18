@@ -27,7 +27,7 @@ The folder is `<APP_DATA_DIR>/expedition-runs/<id>/`: `plan.expedition.ts`, immu
 folders. The log is the only expedition store. The Buddy execution gate refuses every write on
 disabled stores; their views remain readable. Owner questions have one answer route. The manager
 edits the live plan file and calls `rewrite`: typecheck and dry evaluation pin the exact revision. The existing run can adopt a changed goal, rules,
-completion criteria or `autoApply` after an owner confirmation. The manager submits it once; the
+completion criteria or `autoApply` after an owner confirmation. A completed run can receive a follow-up until its original deadline. Reopening always requires the owner to approve that specific revision. Stopped runs stay closed. The manager submits it once; the
 owner can answer after a restart. Approval keeps the original ID, accumulated spend, base, manager,
 total budget and launch-time deadline. It retires obsolete questions and replays completed calls.
 Ordinary revisions inside the accepted allowance run automatically. A first wave over that allowance
