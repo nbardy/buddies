@@ -17,6 +17,15 @@ import { type Contract, defaultCap, gates } from './gates';
 
 export const hash = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
+// The manager can propose these terms. Only the existing owner-answer route can accept them.
+const revisable = ['goal', 'rules', 'done', 'autoApply'] as const;
+type Revision = {
+  from: number;
+  hash: string;
+  contract: Contract;
+  why: string;
+  keep: string[];
+};
 type Entry =
   | {
       t: 'launch';
@@ -27,11 +36,18 @@ type Entry =
       baseLine: string;
       at: number;
     }
-  | { t: 'plan'; version: number; hash: string }
+  | {
+      t: 'plan';
+      version: number;
+      hash: string;
+      revision?: Revision;
+      retire?: string[];
+      approval?: string;
+    }
   | { t: 'start'; call: Call; hash: string }
   | { t: 'result'; key: string; hash: string; receipt: Receipt }
   | { t: 'wake'; key: string; cost: number }
-  | ({ t: 'question' } & ExpeditionQuestion)
+  | ({ t: 'question'; revision?: Revision } & ExpeditionQuestion)
   | { t: 'answer'; key: string; value: unknown }
   | { t: 'status'; status: ExpeditionView['status']; reason?: string };
 // Pattern: one-store-one-index (docs/patterns.md#one-store-one-index)
@@ -39,7 +55,7 @@ type Entry =
 class Run {
   launch!: Extract<Entry, { t: 'launch' }>;
   readonly steps = new Map<string, { call: Call; receipt?: Receipt }>();
-  readonly questions = new Map<string, ExpeditionQuestion>();
+  readonly questions = new Map<string, ExpeditionQuestion & { revision?: Revision }>();
   readonly answers = new Map<string, Extract<Entry, { t: 'answer' }>>();
   readonly wakes = new Map<string, number>();
   readonly versions: number[] = [];
@@ -61,6 +77,16 @@ class Run {
         break;
       case 'plan':
         this.versions.push(e.version);
+        if (e.revision) {
+          this.launch = { ...this.launch, contract: e.revision.contract };
+          this.status = { t: 'status', status: 'running', reason: e.revision.why };
+        }
+        if (e.approval) this.answers.set(e.approval, { t: 'answer', key: e.approval, value: true });
+        for (const key of e.retire ?? []) {
+          if (this.questions.get(key)?.kind === 'manager' && e.revision)
+            this.answers.set(key, { t: 'answer', key, value: e.revision.why });
+          this.questions.delete(key);
+        }
         break;
       case 'start':
         this.steps.set(e.hash, { call: e.call });
@@ -169,7 +195,10 @@ export function createExpeditions(
       spend,
       reserved,
       steps,
-      questions: r.status.status === 'stopped' ? [] : [...r.questions.values()],
+      questions:
+        r.status.status === 'stopped'
+          ? []
+          : [...r.questions.values()].map(({ key, question, kind }) => ({ key, question, kind })),
       versions: r.versions,
     };
   }
@@ -217,15 +246,19 @@ export function createExpeditions(
     }
     const abort = new AbortController();
     const work = async (): Promise<Receipt> => {
-      if (call.t === 'question')
+      if (call.t === 'question') {
+        const out = await question(r, call.key, call.question, call.kind);
+        if (abort.signal.aborted && !r.answers.has(call.key))
+          return { cost: 0, result: { t: 'cancelled', partial: { id: token } } };
         return {
           cost: 0,
           result: {
             t: 'passed',
-            out: await question(r, call.key, call.question, call.kind),
+            out,
             ref: { id: token },
           },
         };
+      }
       const launch = r.launch;
       if (Date.now() > launch.at + launch.contract.budget.hours * 3600000)
         return { cost: 0, result: { t: 'refused', reason: 'deadline' } };
@@ -265,6 +298,7 @@ export function createExpeditions(
   function evaluate(r: Run) {
     const version = view(r.id).versions.at(-1)!;
     r.child = runPlan(path.join(r.folder, 'plans', `v${version}.expedition.ts`), (m, reply) => {
+      if (r.versions.at(-1) !== version || r.status.status === 'stopped') return;
       switch (m.t) {
         case 'contract':
         case 'waiting':
@@ -273,7 +307,9 @@ export function createExpeditions(
           void step(r, m.call).then((r) => reply(r.result));
           break;
         case 'end':
-          void finish(r, m.result).catch((error) => hold(r, String(error)));
+          void finish(r, m.result, version).catch((error) => {
+            if (r.versions.at(-1) === version) return hold(r, String(error));
+          });
           break;
         case 'error':
           void hold(r, m.why);
@@ -285,19 +321,23 @@ export function createExpeditions(
     append(r, { t: 'status', status: 'held', reason: why });
     await question(r, `failure/${hash(why)}`, why, 'manager');
   }
-  async function finish(r: Run, result: { out: unknown; ref: { commit?: string } }) {
+  async function finish(
+    r: Run,
+    result: { out: unknown; ref: { commit?: string } },
+    version: number
+  ) {
+    const current = () => r.versions.at(-1) === version && r.status.status !== 'stopped';
     const c = r.launch.contract;
     for (const [i, done] of c.done.entries()) {
       if ('owner' in done) {
-        if (
-          !(await question(
-            r,
-            `done/${i}/${hash(result)}`,
-            `${done.owner}\nCandidate: ${JSON.stringify(result)}`,
-            'confirm'
-          ))
-        )
-          return hold(r, `Owner declined: ${done.owner}`);
+        const accepted = await question(
+          r,
+          `done/${i}/${hash(result)}`,
+          `${done.owner}\nCandidate: ${JSON.stringify(result)}`,
+          'confirm'
+        );
+        if (!current()) return;
+        if (!accepted) return hold(r, `Owner declined: ${done.owner}`);
       } else {
         const call: Call = {
           key: `done/${i}`,
@@ -319,7 +359,9 @@ export function createExpeditions(
                 usd: (c.doneReview ?? defaultCap(c)).usd,
               } as const)),
         };
+        if (!current()) return;
         const receipt = await step(r, call);
+        if (!current()) return;
         if (
           receipt.result.t !== 'passed' ||
           ('review' in done && (receipt.result.out as { verdict: string }).verdict !== 'yes')
@@ -328,6 +370,43 @@ export function createExpeditions(
       }
     }
     append(r, { t: 'status', status: 'met' });
+  }
+  function install(r: Run, revision: Revision, source: string, approval?: string) {
+    if (revision.from !== r.versions.at(-1) || ['met', 'stopped'].includes(r.status.status))
+      throw new Error('This revision is stale');
+    if (hash(source) !== revision.hash)
+      throw new Error('Revision source does not match its approval');
+    const version = revision.from + 1;
+    fs.writeFileSync(path.join(r.folder, 'plans', `v${version}.expedition.ts`), source);
+    const keep = new Set(revision.keep);
+    const droppedQuestions = new Set<string>();
+    for (const [token, active] of r.active) {
+      if (!keep.has(token)) {
+        active.abort.abort();
+      }
+    }
+    for (const [h, { call, receipt }] of r.steps)
+      if (call.t === 'question' && !receipt && !keep.has(hash([r.id, call.key, h])))
+        droppedQuestions.add(call.key);
+    const retire = [...r.questions.values()]
+      .filter(
+        (q) =>
+          q.revision ||
+          q.kind === 'manager' ||
+          q.key.startsWith('done/') ||
+          q.key.startsWith('rewrite/') ||
+          droppedQuestions.has(q.key)
+      )
+      .map((q) => q.key);
+    // Commit the accepted terms, retired prompts and version together. A crash replays this exact file.
+    append(r, { t: 'plan', version, hash: revision.hash, revision, retire, approval });
+    void r.child?.kill();
+    for (const key of retire) {
+      r.waiters.get(key)?.(r.answers.get(key)?.value);
+      r.waiters.delete(key);
+    }
+    evaluate(r);
+    return view(r.id);
   }
   return {
     allowed,
@@ -382,7 +461,7 @@ export function createExpeditions(
     answer(id: string, key: string, value: unknown) {
       allowed();
       const r = get(id),
-        q = view(id).questions.find((q) => q.key === key);
+        q = r.questions.get(key);
       if (['met', 'stopped'].includes(r.status.status)) throw new Error('Expedition is finished');
       if (
         !q ||
@@ -390,6 +469,13 @@ export function createExpeditions(
         (q.kind === 'confirm' ? typeof value !== 'boolean' : typeof value !== 'string')
       )
         throw new Error('Invalid or closed owner question');
+      if (q.revision && value === true)
+        return install(
+          r,
+          q.revision,
+          fs.readFileSync(path.join(r.folder, 'plans', q.revision.hash + '.ts'), 'utf8'),
+          key
+        );
       append(r, { t: 'answer', key, value });
       r.waiters.get(key)?.(value);
       r.waiters.delete(key);
@@ -402,6 +488,7 @@ export function createExpeditions(
         throw new Error('Only the manager may act');
       if (['met', 'stopped'].includes(r.status.status)) throw new Error('Expedition is finished');
       if (action === 'rewrite') {
+        const from = r.versions.at(-1)!;
         const file = path.join(r.folder, 'plan.expedition.ts'),
           source = fs.readFileSync(file, 'utf8');
         const open = new Set(
@@ -415,29 +502,63 @@ export function createExpeditions(
             known(r, c) ??
             (c.t === 'question' && c.kind === 'manager' && open.has(c.key)
               ? { t: 'passed', out: why, ref: { id: hash(c) } }
-              : undefined)
+              : undefined),
+          source
         );
-        if (hash(checked.contract) !== hash(r.launch.contract))
-          return { issues: ['The owner contract changed'] };
-        if (fs.readFileSync(file, 'utf8') !== source)
-          return { issues: ['The plan changed during gates'] };
-        const extra = checked.preview.costUsd;
+        const original = r.launch.contract;
+        const next = checked.contract;
+        const mutable = new Set<string>(revisable);
         if (
-          extra > checked.contract.autoApply.usd &&
-          !(await question(
-            r,
-            `rewrite/${hash(source)}`,
-            `Apply this rewrite with up to $${extra} additional first-wave cost?`,
-            'confirm'
-          ))
+          Object.keys(original)
+            .concat(Object.keys(next))
+            .some(
+              (k) =>
+                !mutable.has(k) &&
+                hash([original[k as keyof Contract]]) !== hash([next[k as keyof Contract]])
+            )
         )
-          return { issues: ['Owner declined extra cost'] };
-        await r.child?.kill();
-        const retained = new Set(checked.calls.map((c) => hash([r.id, c.key, hash(c)])));
-        for (const [key, active] of r.active) if (!retained.has(key)) active.abort.abort();
-        const version = view(id).versions.length + 1;
-        fs.writeFileSync(path.join(r.folder, 'plans', `v${version}.expedition.ts`), source);
-        append(r, { t: 'plan', version, hash: hash(source) });
+          return {
+            issues: [
+              'The owner contract changed outside goal, rules, done or autoApply. Keep the original budget, deadline, repository and manager.',
+            ],
+          };
+        if (
+          fs.readFileSync(file, 'utf8') !== source ||
+          from !== r.versions.at(-1) ||
+          ['met', 'stopped'].includes(r.status.status)
+        )
+          return { issues: ['Plan or run changed during gates'] };
+        const extra = checked.preview.costUsd;
+        const changed = revisable.filter((k) => hash(original[k]) !== hash(next[k]));
+        const revision: Revision = {
+          from,
+          hash: hash(source),
+          why,
+          contract: next,
+          keep: checked.calls.map((c) => hash([r.id, c.key, hash(c)])),
+        };
+        if (changed.length || extra > original.autoApply.usd) {
+          const key = `rewrite/${from}/${revision.hash}`;
+          if (r.answers.get(key)?.value === false)
+            return { issues: ['Owner declined this rewrite'] };
+          if (!r.questions.has(key)) {
+            const v = view(id);
+            const differences = changed.map((k) =>
+              k === 'goal'
+                ? `Revised goal\n${next.goal}`
+                : `${k}: ${JSON.stringify(original[k])} → ${JSON.stringify(next[k])}`
+            );
+            const prompt = [
+              `Revise this expedition in place? ${why}`,
+              `Next steps: ${checked.calls.map((c) => c.key).join(', ') || 'none'}. Up to $${extra} within the existing $${v.budget.usd} ceiling ($${v.spend} booked, $${v.reserved} reserved).`,
+              ...differences,
+            ].join('\n');
+            fs.writeFileSync(path.join(r.folder, 'plans', revision.hash + '.ts'), source);
+            append(r, { t: 'question', key, kind: 'confirm', question: prompt, revision });
+          }
+          return view(id);
+        }
+        return install(r, revision, source);
       }
       // Continuing also replays once; keeping the old child could run two plan loops.
       // Guard: expedition-backend manager actions reuse finished keys.

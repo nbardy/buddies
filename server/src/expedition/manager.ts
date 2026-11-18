@@ -15,7 +15,7 @@ export function manager(core: BuddiesCore, events: BuddyEvents) {
         evidence: [],
         broadcast: false,
         key: `expedition:${id}:${key}`,
-        body: `Expedition ${id} needs your decision: ${question}\nRead ${folder}/log.jsonl and ${folder}/plan.expedition.ts. Act through expedition {action:{do:"continue"|"stop"|"rewrite",id:"${id}",why}}. For rewrite, edit that plan file first, preserve its owner contract, then call the tool. Rejections return issues immediately; fix them and call again in this turn. Record what you learned in your Buddy memory.`,
+        body: `Expedition ${id} needs your decision: ${question}\nRead ${folder}/log.jsonl and ${folder}/plan.expedition.ts. Act through expedition {action:{do:"continue"|"stop"|"rewrite",id:"${id}",why}}. For rewrite, edit that plan file first, keep its budget, deadline, repository and manager, then call the tool. Changed goal, rules, completion criteria or rewrite allowance go to the owner once on the same run. Rejections return issues immediately; fix them and call again in this turn. Record what you learned in your Buddy memory.`,
       }
     );
     if (result.created) await announcePost({ core, events }, OWNER, result.post);

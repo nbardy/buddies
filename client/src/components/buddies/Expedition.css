@@ -12,7 +12,7 @@
 .expedition h2, .expedition-proposal h3 {
   margin: 0;
 }
-.expedition-goal {
+.expedition-goal, .expedition-question > strong {
   white-space: pre-wrap;
 }
 .expedition-steps {

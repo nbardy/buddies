@@ -26,8 +26,12 @@ The folder is `<APP_DATA_DIR>/expedition-runs/<id>/`: `plan.expedition.ts`, immu
 `plans/vN.expedition.ts`, and the server-written `log.jsonl`, with inline results and per-step work
 folders. The log is the only expedition store. The Buddy execution gate refuses every write on
 disabled stores; their views remain readable. Owner questions have one answer route. The manager
-edits the live plan file and calls `rewrite`: typecheck, dry evaluation and unchanged contract are
-checked inside the call. Extra first-wave cost above `autoApply` asks the owner. Dropped running
+edits the live plan file and calls `rewrite`: typecheck and dry evaluation pin the exact revision. The existing run can adopt a changed goal, rules,
+completion criteria or `autoApply` after an owner confirmation. The manager submits it once; the
+owner can answer after a restart. Approval keeps the original ID, accumulated spend, base, manager,
+total budget and launch-time deadline. It retires obsolete questions and replays completed calls.
+Ordinary revisions inside the accepted allowance run automatically. A first wave over that allowance
+shows its steps, booked and reserved amounts, and the existing ceiling in the owner's question. Dropped running
 steps are cancelled. Manager wakes tell it to record lessons in its ordinary Buddy memory.
 
 Measured source (`wc -l`, formatted); predictions are the owner's original budget. This candidate

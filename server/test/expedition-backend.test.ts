@@ -57,7 +57,7 @@ async function main(){
   if(manager[2]==='stop'){await client.callTool({name:'expedition',arguments:{action:{do:'stop',id:manager[1],why:'Done with this proof'}}});await client.close();done('Stopped');return;}
   const folder=/Read (.+)\/log.jsonl/.exec(prompt)[1];
   const next=fs.readFileSync(path.join(fake,'next.ts'),'utf8');
-  fs.writeFileSync(path.join(folder,'plan.expedition.ts'),next.replace("goal:'test'","goal:'changed'"));
+  fs.writeFileSync(path.join(folder,'plan.expedition.ts'),next.replace("budget:{usd:3","budget:{usd:12"));
   const invoke=()=>client.callTool({name:'expedition',arguments:{action:{do:'rewrite',id:manager[1],why:'Replace dropped work'}}});
   const rejected=await invoke();fs.writeFileSync(path.join(fake,'rejected'),JSON.stringify(rejected));
   fs.writeFileSync(path.join(folder,'plan.expedition.ts'),next);
