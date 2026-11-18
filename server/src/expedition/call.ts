@@ -74,10 +74,15 @@ export async function worktreeGit(tree: string, branch: string): Promise<TurnGit
   for (const dir of dirs) fs.mkdirSync(dir, { recursive: true });
   return { t: 'worktree', dirs: dirs.map((d) => fs.realpathSync(d)) };
 }
+type Seat = { provider: string; model: string; effort: string };
+// A step's judge with its reviewer already selected, so no review can fail to start after the writer ran.
+type Judge =
+  | { t: 'check'; check: string }
+  | { t: 'review'; review: string; by: string; seat: Seat };
 export type CallDeps = {
   runTurn(r: RunTurnRequest): Promise<RunTurnOutcome>;
   cancelTurn(key: string): Promise<void>;
-  resolve(who: string): Promise<{ provider: string; model: string; effort: string }>;
+  resolve(who: string): Promise<Seat>;
 };
 export const modelOf = (who: string) => {
   const model = parseModelString(who);
@@ -146,7 +151,7 @@ export async function execute(
   const turns: string[] = [];
   const run = async (
     key: string,
-    by: string,
+    model: Seat,
     brief: string,
     schema: object,
     caps: TurnCapabilities,
@@ -156,7 +161,6 @@ export async function execute(
     minutes = c.minutes
   ): Promise<Receipt> => {
     if (at.signal.aborted) return { cost: 0, result: { t: 'cancelled', partial: ref } };
-    const model = await d.resolve(by);
     turns.push(key);
     const request: RunTurnRequest = {
       key,
@@ -220,6 +224,21 @@ export async function execute(
         };
       }
       case 'agent': {
+        // Select the writer and its reviewer before either runs. On 2026-11-18 a review by a Buddy with
+        // no selected model threw here after the writer had finished: the engine booked the step's whole
+        // reservation ($7.50) for an unreviewed answer. A seat that cannot be selected now costs nothing.
+        // Guard: expedition-call books nothing when a seat cannot be selected.
+        let writer: Seat, judge: Judge | undefined;
+        try {
+          writer = await d.resolve(c.by);
+          judge = !c.judge
+            ? undefined
+            : 'check' in c.judge
+              ? { t: 'check', check: c.judge.check }
+              : { t: 'review', ...c.judge, seat: await d.resolve(c.judge.by) };
+        } catch (error) {
+          return { cost: 0, result: { t: 'errored', why: String(error) } };
+        }
         if (c.checkout) await checkout(true);
         // Done reviews read the candidate's exact tree too, rather than only its answer.
         // Guard: expedition-backend reads the source and diff for a done review.
@@ -243,7 +262,7 @@ export async function execute(
         );
         const r = await run(
           at.token,
-          c.by,
+          writer,
           `${at.contract.rules.join('\n')}\n${c.brief}\n${c.checkout ? `Starting commit ${base}. Commit your changes.` : ''}${pinned ? `\nTHE CODE: exact commit ${base} at ${tree}; diff ${path.join(own, 'changes.diff')}. Open both.` : ''}`,
           c.output!,
           caps,
@@ -270,15 +289,15 @@ export async function execute(
         }
         let why: string | undefined;
         let reviewReceipt: Receipt['review'];
-        if (c.judge) {
-          const j = c.judge;
+        if (judge) {
+          const j = judge;
           const judged = path.join(own, 'judge');
-          if (!fs.existsSync(judged))
-            await git(at.repo, ['worktree', 'add', '--detach', judged, ref.commit!]);
-          if ((await git(judged, ['rev-parse', 'HEAD'])) !== ref.commit)
-            throw new Error('Judge checkout is at the wrong commit');
           try {
-            if ('check' in j) {
+            if (!fs.existsSync(judged))
+              await git(at.repo, ['worktree', 'add', '--detach', judged, ref.commit!]);
+            if ((await git(judged, ['rev-parse', 'HEAD'])) !== ref.commit)
+              throw new Error('Judge checkout is at the wrong commit');
+            if (j.t === 'check') {
               const check = await command(j.check, judged, c.minutes, at.signal);
               if (check.code !== 0) why = check.tail;
             } else {
@@ -287,7 +306,7 @@ export async function execute(
               const max = at.contract.doneReview ?? defaultCap(at.contract);
               const review = await run(
                 `${at.token}/review`,
-                j.by,
+                j.seat,
                 `THE CODE: exact commit ${ref.commit} at ${judged}; diff ${diff}. Open both and quote code.\n${j.review}`,
                 verdict,
                 capabilitiesOf({ t: 'read', reads: [judged, own], web: false }),
@@ -299,8 +318,17 @@ export async function execute(
               if (review.result.t !== 'passed') why = JSON.stringify(review.result);
               reviewReceipt = { ...review, who: j.by };
             }
+          } catch (error) {
+            // The writer's turn is already paid for at its real price: report that, not the reservation.
+            // Guard: expedition-call keeps the writer's cost when its review cannot finish.
+            return {
+              ...r,
+              commit: ref.commit,
+              result: { t: 'errored', why: `Review could not finish: ${error}` },
+            };
           } finally {
-            await git(at.repo, ['worktree', 'remove', '--force', judged]);
+            if (fs.existsSync(judged))
+              await git(at.repo, ['worktree', 'remove', '--force', judged]);
           }
         }
         return {
