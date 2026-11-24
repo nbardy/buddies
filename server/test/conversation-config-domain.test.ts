@@ -114,6 +114,24 @@ test('application defaults retain the refreshed picker while explicit reasoning 
   if (explicit.status === 'resolved') assert.equal(explicit.value.reasoningEffort, 'ultra');
 });
 
+// Guard against the CLI and app catalogs disagreeing about the ID sent to Cursor.
+test('Cursor passes the selected Gemini 4 Neon model ID to the CLI', () => {
+  const modelId = 'gemini-4-neon';
+  const cursor = createProviderCatalog().providers.find((provider) => provider.id === 'cursor');
+  assert.equal(cursor?.models.find((model) => model.id === modelId)?.displayName, 'Gemini 4 Neon');
+
+  const resolved = resolveConfigAgainstProviderCatalog(
+    config({ provider: 'cursor', model: { mode: 'explicit', modelId } })
+  );
+  assert.equal(resolved.status, 'resolved');
+  assert.equal(resolved.value.modelId, modelId);
+  assert.equal(resolved.value.reasoningEffort, undefined);
+
+  const { argv } = buildCommand('cursor', { model: resolved.value.modelId, prompt: 'test' });
+  assert.ok(argv.includes('--model'));
+  assert.equal(argv[argv.indexOf('--model') + 1], modelId);
+});
+
 // Regression guard (2026-09-30): gpt-6.1-sol was added with codex's own default_reasoning_level
 // (`low`) and the only test pinning the default was edited to match. Medium is our policy for EVERY
 // reasoning model, and an omitted default would silently hand the choice to the CLI, so assert it

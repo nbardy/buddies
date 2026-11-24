@@ -437,6 +437,10 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
         "displayName": "Composer 2.5"
       },
       {
+        "id": "gemini-4-neon",
+        "displayName": "Gemini 4 Neon"
+      },
+      {
         "id": "grok-4.7-xhigh",
         "displayName": "Grok 4.7 Extra High"
       },
