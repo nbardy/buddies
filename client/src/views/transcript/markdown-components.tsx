@@ -8,6 +8,11 @@ import { COPY_LABEL, useCopyAction } from '../../hooks/useCopyAction';
  * remark-math recognizes $...$ and $$...$$, while model output commonly uses
  * LaTeX's \(...\) and \[...\] delimiters. Normalize those alternate delimiters
  * before parsing, without changing fenced or inline code.
+ *
+ * Fix-guard: remark-math pairs any two single dollars, so "spent $14.75 of its $90 budget"
+ * rendered "14.75 of its" as italic math (owner screenshot, expedition chat, 2026-11-24).
+ * A single `$` opens math only under Pandoc's rule (singleDollarMathEnd); any other single
+ * `$` is escaped as currency. Guard: channel-markdown test "currency dollars stay literal".
  */
 export function normalizeLatexDelimiters(markdown: string): string {
   const lines = markdown.split('\n');
@@ -57,6 +62,23 @@ export function normalizeLatexDelimiters(markdown: string): string {
           continue;
         }
 
+        if (inlineCodeLength === 0 && line[i] === '$' && line[i - 1] !== '\\') {
+          if (line[i + 1] === '$') {
+            result += '$$';
+            i += 2;
+            continue;
+          }
+          const close = singleDollarMathEnd(line, i);
+          if (close < 0) {
+            result += '\\$';
+            i++;
+          } else {
+            result += line.slice(i, close + 1);
+            i = close + 1;
+          }
+          continue;
+        }
+
         result += line[i];
         i++;
       }
@@ -64,6 +86,24 @@ export function normalizeLatexDelimiters(markdown: string): string {
       return result;
     })
     .join('\n');
+}
+
+/**
+ * Index of the `$` that closes single-dollar math opened at `open`, or -1. Pandoc's rule,
+ * stricter: non-space after the opener; the closer is the next `$` on the same line, outside
+ * code, with non-space before it and no digit after it.
+ */
+function singleDollarMathEnd(line: string, open: number): number {
+  if (!/\S/.test(line[open + 1] ?? ' ')) return -1;
+  for (let j = open + 2; j < line.length; j++) {
+    if (line[j] === '`') return -1;
+    if (line[j] !== '$' || line[j - 1] === '\\') continue;
+    // Only the next `$` can close (math never contains one), so "$5 then $x$" stays currency.
+    return line[j + 1] !== '$' && /\S/.test(line[j - 1]) && !/[0-9]/.test(line[j + 1] ?? '')
+      ? j
+      : -1;
+  }
+  return -1;
 }
 
 // react-markdown v10 calls `code` for fenced and inline code alike; classify into CodeContent and

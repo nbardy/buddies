@@ -142,6 +142,17 @@ R_i=\frac{x_i}{s_i}
   assert.match(code, /\\\[R_i=\\frac/);
 });
 
+// Owner screenshot 2026-11-24 (expedition chat): "$14.75 of its $90" rendered as math.
+test('currency dollars stay literal while single-dollar math still renders', () => {
+  const money = renderChannel('The expedition spent $14.75 of its $90 budget and $0 on calls.');
+  assert.doesNotMatch(money, /math-inline/);
+  assert.match(money, /\$14\.75 of its \$90 budget and \$0 on calls/);
+  const mixed = renderChannel('Pay $5, then minimize $x + y$ for `$a$`.');
+  assert.match(mixed, /class="language-math math-inline">x \+ y<\/code>/);
+  assert.match(mixed, /Pay \$5, then/);
+  assert.match(mixed, /<code>\$a\$<\/code>/);
+});
+
 // Owner report 2026-09-24 (#general thread): a mention reply showed the raw
 // `<!--buddy_team_configuration:%7B%22…-->` blob under "6 tool calls". Team
 // configuration was retired with the v2 Buddy server (T11), but old posts
