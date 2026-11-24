@@ -16,7 +16,7 @@ import {
   postPurposeTag,
 } from '../../components/buddies/channel-data';
 import { channelLinkPath, postLink } from '../../components/buddies/channel-link';
-import type { Channel, Post } from '../../components/buddies/types';
+import type { Channel, Post, ThreadStat } from '../../components/buddies/types';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
 
 // The mobile transcript's rows and screen header, shared by the channel, thread, Task and
@@ -44,6 +44,8 @@ export type RowPlace =
       kind: 'channel';
       threadHref(rootId: string): string;
       responding: ReadonlyMap<string, string>;
+      // The thread stats the channel feed carries, keyed by root id (as on desktop).
+      threads: ReadonlyMap<string, ThreadStat>;
     }
   | { kind: 'thread' }
   | { kind: 'task'; workspaceId: string; channelNames: ReadonlyMap<string, string> }
@@ -65,7 +67,9 @@ function PostPurpose({ post }: { post: Post }) {
   );
 }
 
-// Posts carry no reply count (the API has none): every root offers its thread.
+// Every channel root shows its thread entry in the footer, outside the message fold: the count
+// and last reply when it has replies, "Thread" otherwise. It is always visible (not focus-gated),
+// so a phone owner can see and open it. The count reuses desktop's thread stats (no new API).
 function PostFooter({ post, context }: { post: Post; context: RowContext }) {
   switch (context.place.kind) {
     case 'thread':
@@ -85,13 +89,21 @@ function PostFooter({ post, context }: { post: Post; context: RowContext }) {
     case 'channel': {
       const place = context.place;
       const replying = place.responding.get(post.id);
+      const stat = place.threads.get(post.id);
       return (
-        <div className="mobile-channel-post__footer ui-row">
+        <div className="mobile-channel-post__footer mobile-channel-post__footer--root ui-row">
           <Link
             className="mobile-channel-post__reply ui-inline-row ui-muted"
             to={place.threadHref(post.rootId ?? post.id)}
           >
-            Thread
+            {stat === undefined ? (
+              'Thread'
+            ) : (
+              <>
+                {stat.replies} {stat.replies === 1 ? 'reply' : 'replies'} · Last reply{' '}
+                {clockTime(stat.lastReplyAt)}
+              </>
+            )}
           </Link>
           {replying !== undefined && (
             <span className="mobile-channel-post__replying">

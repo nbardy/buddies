@@ -396,7 +396,7 @@ a.mobile-channels-wake-done {
   gap: var(--sp-2) var(--sp-6);
   margin-top: 2px;
 }
-.mobile-channel-post:focus-within .mobile-channel-post__footer, .mobile-channel-post__footer:has(.mobile-channel-post__replying) { display: flex; } /* Thread link only on tap (focusable post) or while replying: one under every post was noise (2026-11-03) */
+.mobile-channel-post:focus-within .mobile-channel-post__footer, .mobile-channel-post__footer:has(.mobile-channel-post__replying) { display: flex; } .mobile-channel-post__footer--root { display: flex; } /* Task/Threads footers: tap-only (2026-11-03). Channel roots: always shown (2026-11-24, thread entry + count) */
 /* Slim tap target under each post: a taller one made every message a third larger (2026-11-03). */
 .mobile-channel-post__reply {
   min-height: 26px;

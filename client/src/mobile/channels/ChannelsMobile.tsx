@@ -640,6 +640,7 @@ function ChannelScreen({ channelId, context }: { channelId: string; context: Scr
       threadHref: (rootId) =>
         channelsHref(workspaceId, { kind: 'thread', channelId, rootId, linkedPostId: null }),
       responding,
+      threads: feed.threads,
     },
     linkedPostId: null,
   };
