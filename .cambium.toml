@@ -1,0 +1,20 @@
+version = 1
+
+[settings]
+require_cow = true
+workspace_root = "~/git/_wt"
+merge_target = "origin/main"
+prune_merged_on_add = true
+
+# Never clone Rust build outputs or release footage/output artifacts into worktrees.
+[[path]]
+path = "target"
+policy = "skip"
+
+[[path]]
+path = "crates/target"
+policy = "skip"
+
+[[path]]
+path = "output"
+policy = "skip"
