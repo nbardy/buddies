@@ -132,6 +132,20 @@ test('Cursor passes the selected Gemini 4 Neon model ID to the CLI', () => {
   assert.equal(argv[argv.indexOf('--model') + 1], modelId);
 });
 
+test('Antigravity is available to Buddies and resolves a saved Gemini model to Neon', () => {
+  const antigravity = createProviderCatalog().providers.find(
+    (provider) => provider.id === 'gemini'
+  );
+  assert.equal(antigravity?.displayName, 'Antigravity');
+  assert.equal(antigravity?.supportsRequiredMcp, true);
+  const resolved = resolveConfigAgainstProviderCatalog(
+    config({ provider: 'gemini', model: { mode: 'explicit', modelId: 'gemini-2.5-pro' } })
+  );
+  assert.equal(resolved.status, 'resolved');
+  assert.equal(resolved.value.modelId, 'gemini-4-neon');
+  assert.equal(resolved.value.reasoningEffort, 'medium');
+});
+
 // Regression guard (2026-09-30): gpt-6.1-sol was added with codex's own default_reasoning_level
 // (`low`) and the only test pinning the default was edited to match. Medium is our policy for EVERY
 // reasoning model, and an omitted default would silently hand the choice to the CLI, so assert it

@@ -618,14 +618,17 @@ export class TurnRunner {
   }
 
   async noteFailure(cause: 'out_of_tokens' | 'provider_error', message: string): Promise<void> {
-    if (
+    const rejectedCodexResume =
       this.host.provider === 'codex' &&
       (message.includes('no rollout found for thread id') ||
         (message.includes('thread/resume') &&
-          message.includes('does not have a canonical rollout filename')))
-    ) {
-      // Rejected rollout bindings otherwise fail on every retry, including after restart.
-      // Guard: conversation-runtime rejected-rollout retries + config-service durable invalidation.
+          message.includes('does not have a canonical rollout filename')));
+    // Antigravity cannot open legacy Gemini CLI session IDs. Invalidate only
+    // the active binding so the next send starts fresh and history stays linked.
+    const rejectedGeminiResume =
+      this.host.provider === 'gemini' &&
+      /^Failed to read session .+; retry, or load it with session\/load$/.test(message);
+    if (rejectedCodexResume || rejectedGeminiResume) {
       this.host.markSessionStarted(false);
       await this.host.invalidateSession();
     }

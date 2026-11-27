@@ -317,6 +317,7 @@ pub fn default_roots(home: String) -> Vec<Root> {
         at(Format::Codex, ".codex/sessions"),
         at(Format::Cursor, ".cursor/projects"),
         at(Format::Gemini, ".gemini/tmp"),
+        at(Format::Agy, ".gemini/antigravity-cli/conversations"),
         at(Format::Opencode, ".local/share/opencode/storage"),
         at(Format::Pi, ".pi/agent/sessions"),
         at(Format::Muse, ".local/share/muse/sessions"),

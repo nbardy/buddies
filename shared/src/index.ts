@@ -47,15 +47,13 @@ export { unreachable } from './unreachable.js';
 // first send, when source and target share a provider in this set, the turn
 // upgrades to native session inheritance: the child inherits the source's CLI
 // transcript under a NEW provider session id (source untouched). Needs harness
-// sessionForkFlags (claude/opencode) or emulateFork (codex/gemini). Cursor is
-// omitted: no `--fork`, and chats are opaque sqlite / cloud-backed under
-// ~/.cursor/chats/. See Conversation.sendMessage in server runtime.ts.
+// sessionForkFlags (claude/opencode) or emulateFork (codex). Antigravity and
+// Cursor use the soft handoff. See Conversation.sendMessage in server runtime.ts.
 //
 export const FORK_CAPABLE_PROVIDERS: ReadonlySet<Provider> = new Set<Provider>([
   'claude',
   'opencode',
   'codex',
-  'gemini',
 ]);
 
 /** True if this provider's harness can fork a provider session natively. */

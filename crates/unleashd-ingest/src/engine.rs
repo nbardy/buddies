@@ -120,6 +120,10 @@ impl Engine {
                 Touched::Unrelated => {}
             }
         }
+        // An Antigravity database and its WAL can notify in the same batch.
+        // Both resolve to the same source, which should be read only once.
+        sources.sort_unstable_by(|a, b| a.1.cmp(&b.1));
+        sources.dedup();
         let mut report = self.process(sources, gone, on_commit);
         for root in whole {
             let more = self.scan_root(&root, on_commit);

@@ -31,6 +31,7 @@ impl Stamp {
         let meta = std::fs::metadata(path)?;
         let file_mtime = meta.mtime() as f64 * 1000.0 + (meta.mtime_nsec() / 1_000_000) as f64;
         Ok(match format {
+            Format::Agy => Stamp { dev: meta.dev(), ino: meta.ino(), size: meta.size(), mtime_ms: parsers::agy::mtime(path, file_mtime) },
             Format::Opencode => Stamp { dev: meta.dev(), ino: meta.ino(), size: 0, mtime_ms: parsers::opencode::composite_mtime(path) },
             _ => Stamp { dev: meta.dev(), ino: meta.ino(), size: meta.size(), mtime_ms: file_mtime },
         })
@@ -424,6 +425,7 @@ pub fn read_source(
             FoldState::Muse(f) => Some(f),
             _ => None,
         }),
+        Format::Agy => Ok(read_doc(stamp, parsers::agy::read(path, &ctx)?)),
         Format::Gemini => Ok(read_doc(stamp, parsers::gemini::read(path, &ctx)?)),
         Format::Opencode => Ok(read_doc(stamp, parsers::opencode::read(path, &ctx)?)),
     }

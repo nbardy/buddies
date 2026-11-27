@@ -34,6 +34,7 @@ fn muse_walk(dir: &Path, out: &mut Vec<PathBuf>) {
 pub fn discover(root: &Root) -> Vec<PathBuf> {
     let base = Path::new(&root.path);
     match root.format {
+        Format::Agy => files(base, ".db"),
         Format::Pi => subdirs(base).iter().flat_map(|d| files(d, ".jsonl")).collect(),
         Format::Claude => subdirs(base).iter().flat_map(|d| files(d, ".jsonl")).collect(),
         Format::Codex => {
@@ -74,6 +75,11 @@ pub fn classify(root: &Root, path: &Path) -> Touched {
     let name = parts.last().copied().unwrap_or("");
     let visible = |i: usize| parts.get(i).is_some_and(|p| !p.starts_with('.'));
     let is_source = match root.format {
+        Format::Agy if parts.len() == 1 && name.ends_with(".db-wal") => {
+            let db = path.with_file_name(name.trim_end_matches("-wal"));
+            return if db.exists() { Touched::Source(db) } else { Touched::Unrelated };
+        }
+        Format::Agy => parts.len() == 1 && name.ends_with(".db"),
         Format::Pi => parts.len() == 2 && visible(0) && name.ends_with(".jsonl"),
         Format::Claude => parts.len() == 2 && visible(0) && name.ends_with(".jsonl"),
         Format::Codex => parts.len() == 4 && visible(0) && visible(1) && visible(2) && name.ends_with(".jsonl"),

@@ -116,6 +116,15 @@ OpenCode (`supportsDynamicModels`) also accepts ad-hoc path-style IDs
 - The `-` positional argument tells Codex to read the prompt from stdin
 - Codex self-persists sessions to `~/.codex/sessions/YYYY/MM/DD/*.jsonl`
 
+### Antigravity
+- The saved provider ID is `gemini` and the picker calls it **Antigravity**.
+- Install and sign into `agy` before using Gemini 4 Neon. The live probe uses Antigravity CLI 1.5.18.
+- Conversation turns use Antigravity's ACP stdio server. Each turn opens or resumes one native
+  session by ID and passes the required Buddy MCP connection in that session's parameters.
+- Legacy Gemini CLI history remains readable. If the old session ID is rejected, retry the queued
+  message to start a new Antigravity session linked to the same conversation.
+- Antigravity uses the standard soft handoff when forking a chat.
+
 ### OpenCode
 - First message: `opencode run --format json` (reads prompt from stdin)
 - OpenCode emits `sessionID` on JSON events (top-level or `part`) — the server captures this for resume
@@ -146,6 +155,11 @@ Provider stdout parsing is centralized in `agent-cli-tool`.
 - Message content is reconstructed from associated part files in `~/.local/share/opencode/storage/part/{message-id}/*.json`
 - Session metadata (cwd/title/time) is read from `~/.local/share/opencode/storage/session/{project-id}/{session-id}.json` when present
 - During active turns, in-memory streaming state is authoritative; the ingest watcher skips active session IDs
+
+### Antigravity
+- Persists sessions under `~/.gemini/antigravity-cli/conversations/*.db`.
+- The ingest reader opens the database read-only and tracks WAL writes so settled text and tool
+  calls survive refreshes and server restarts.
 
 ### Loading
 - The `unleashd-ingest` addon (`crates/unleashd-ingest`) loads Claude from `~/.claude/projects/*`, Codex from `~/.codex/sessions/YYYY/MM/DD/*`, and OpenCode from `~/.local/share/opencode/storage/message/*`

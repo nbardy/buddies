@@ -110,6 +110,7 @@ test('ingest a root, receive an append through onChange, page by revision', asyn
 test('defaultRoots names every provider format', () => {
   const formats = new Set(defaultRoots('/home/x').map((r) => r.format));
   assert.deepEqual([...formats].sort(), [
+    'agy',
     'claude',
     'codex',
     'cursor',

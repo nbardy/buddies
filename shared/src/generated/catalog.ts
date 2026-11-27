@@ -403,29 +403,43 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
   },
   {
     "id": "gemini",
-    "displayName": "Gemini",
+    "displayName": "Antigravity",
     "shortName": "G",
     "models": [
       {
-        "id": "gemini-3.1-pro-preview",
-        "displayName": "Gemini 3.1 Pro Preview"
+        "id": "gemini-4-neon",
+        "displayName": "Gemini 4 Neon",
+        "reasoning": {
+          "levels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "defaultEffort": "medium"
+        }
       },
       {
-        "id": "gemini-2.5-pro",
-        "displayName": "Gemini 2.5 Pro"
-      },
-      {
-        "id": "gemini-2.5-flash",
-        "displayName": "Gemini 2.5 Flash"
-      },
-      {
-        "id": "gemini-2.0-flash",
-        "displayName": "Gemini 2.0 Flash"
+        "id": "gemini-3.8-flash",
+        "displayName": "Gemini 3.8 Flash",
+        "reasoning": {
+          "levels": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "defaultEffort": "medium"
+        }
       }
     ],
-    "defaultModelId": "gemini-2.5-pro",
+    "defaultModelId": "gemini-4-neon",
     "supportsDynamicModels": false,
-    "aliases": {}
+    "aliases": {
+      "gemini-3.1-pro-preview": "gemini-4-neon",
+      "gemini-2.5-pro": "gemini-4-neon",
+      "gemini-2.5-flash": "gemini-3.8-flash",
+      "gemini-2.0-flash": "gemini-3.8-flash"
+    }
   },
   {
     "id": "cursor",

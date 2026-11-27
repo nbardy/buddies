@@ -15,6 +15,7 @@
 
 pub mod claude;
 pub mod codex;
+pub mod agy;
 pub mod cursor;
 pub mod gemini;
 pub mod muse;

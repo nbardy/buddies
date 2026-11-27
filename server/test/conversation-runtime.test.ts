@@ -641,18 +641,25 @@ test('a Codex turn that fails before creating a thread retries without resume', 
   assert.equal(conversation.sessionId, 'real-codex-thread');
 });
 
-for (const [label, message] of [
-  ['missing', 'thread/resume failed: no rollout found for thread id phantom-thread'],
+for (const [provider, label, message] of [
+  ['codex', 'missing', 'thread/resume failed: no rollout found for thread id phantom-thread'],
   [
+    'codex',
     'noncanonical',
     'thread/resume: thread/resume failed: paginated rollout path /tmp/rollout-2026-10-12T12-41-55-517Z-9bc064ee-f395-4743-92a3-3c9e0ad2cc23.jsonl does not have a canonical rollout filename (code -32600)',
   ],
-]) {
-  test(`a ${label} Codex rollout clears the rejected session binding`, async () => {
+  [
+    'gemini',
+    'unreadable',
+    'Failed to read session phantom-thread; retry, or load it with session/load',
+  ],
+] as const) {
+  test(`a ${label} ${provider} session clears the rejected session binding`, async () => {
     type Request = Parameters<NonNullable<ConversationRuntimeDependencies['executeTurn']>>[0];
     const requests: Request[] = [];
     const invalidated: string[] = [];
     const fixture = runtimeFixture({
+      provider,
       invalidateCurrentSession: async (_id, sessionId) => {
         invalidated.push(sessionId);
       },
@@ -668,7 +675,7 @@ for (const [label, message] of [
                 message,
               };
             } else {
-              yield { type: 'session.started' as const, sessionId: 'new-codex-thread' };
+              yield { type: 'session.started' as const, sessionId: 'new-provider-session' };
               yield { type: 'text.delta' as const, text: 'Ready' };
               yield { type: 'turn.complete' as const, reason: 'success' as const };
             }
@@ -676,7 +683,7 @@ for (const [label, message] of [
           completed: Promise.resolve({
             exitCode: missing ? 1 : 0,
             signal: null,
-            sessionId: missing ? '' : 'new-codex-thread',
+            sessionId: missing ? '' : 'new-provider-session',
             reason: missing ? ('error' as const) : ('success' as const),
           }),
           stop: () => undefined,
@@ -684,7 +691,7 @@ for (const [label, message] of [
       }),
     });
     const conversation = new fixture.Conversation({
-      id: 'legacy-codex-conversation',
+      id: 'legacy-provider-conversation',
       done: false,
       kind: { t: 'chat' },
       workingDirectory: '/tmp',
@@ -701,7 +708,7 @@ for (const [label, message] of [
     assert.equal(requests.length, 2);
     assert.equal(requests[0].resumeSessionId, 'phantom-thread');
     assert.equal(requests[1].resumeSessionId, undefined);
-    assert.equal(conversation.sessionId, 'new-codex-thread');
+    assert.equal(conversation.sessionId, 'new-provider-session');
     assert.ok(
       conversation.messages.some(
         (row) => row.role === 'user' && row.body.t === 'text' && row.body.text === 'Resume'
@@ -716,10 +723,10 @@ for (const [label, message] of [
 }
 
 test('unsupported Buddy provider leaves a queued message retryable', () => {
-  const fixture = runtimeFixture({ provider: 'gemini' });
+  const fixture = runtimeFixture({ provider: 'opencode' });
   const conversation = new fixture.Conversation({
     done: false,
-    id: 'gemini-buddy',
+    id: 'opencode-buddy',
     workingDirectory: '/tmp',
     configState: fixture.configState,
     kind: buddyKind({
@@ -986,7 +993,7 @@ test('every harness receives its resolved effort in one request shape', () => {
     claude: 'medium',
     codex: 'medium',
     muse: 'medium',
-    gemini: undefined,
+    gemini: 'medium',
     opencode: undefined,
     cursor: undefined,
     pi: 'medium',

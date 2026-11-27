@@ -129,7 +129,8 @@ async function start() {
       ...process.env,
       ...NO_AUTO_INSTALL,
       HOME: home,
-      PATH: `${bin}:${path.dirname(process.execPath)}:${path.dirname(execFileSync('which', ['git-cambium'], { encoding: 'utf8' }).trim())}:/usr/bin:/bin`,
+      // Cambium uses /usr/sbin/lsof to check that a completed worktree is idle.
+      PATH: `${bin}:${path.dirname(process.execPath)}:${path.dirname(execFileSync('which', ['git-cambium'], { encoding: 'utf8' }).trim())}:/usr/bin:/bin:/usr/sbin:/sbin`,
       PORT: String(port),
       UNLEASHD_DATA_DIR: data,
       UNLEASHD_BUDDIES_DB: path.join(root, 'buddies.sqlite'),

@@ -241,7 +241,7 @@ export type Cwd =
 /** The standard provider roots under `home`, including any Gemini sandbox homes that exist. */
 export declare function defaultRoots(home: string): Array<Root>
 
-export type Format = 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode' | 'muse' | 'pi'
+export type Format = 'agy' | 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode' | 'muse' | 'pi'
 
 /** Who a session belongs to, recovered from in-band markers (and Muse's durable creation record). */
 export type Identity =
