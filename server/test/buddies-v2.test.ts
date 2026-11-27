@@ -79,7 +79,7 @@ import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-se
 import { installedAgent } from '../src/providers/installed-agent';
 import { BackgroundWork } from '../src/turns/background-work';
 import { bootstrapUnleashdHome } from '../src/upstream/unleashd-home';
-import { testExecutions } from './fixtures/fake-turn';
+import { fakeExecuteTurn, testExecutions } from './fixtures/fake-turn';
 import { recordStore } from './fixtures/records';
 import test from './fixtures/shard';
 import { tempDir } from './fixtures/temp';
@@ -3499,6 +3499,53 @@ test('a reply gate with no answer, or out of tokens, fails with the provider mes
   const verdict = await gate({ config: createDefaultConversationConfig('claude'), prompt: 'p' });
   assert.equal(verdict.kind, 'failed');
   assert.match(verdict.kind === 'failed' ? verdict.reason : '', /out_of_tokens.*session limit/);
+});
+
+test('Antigravity follow-ups gate on the seat model in scratch storage', async () => {
+  let directory: string | undefined;
+  const config = createDefaultConversationConfig('gemini');
+  const gate = createCliReplyGate({
+    resolveExecution: async (received) => {
+      assert.deepEqual(received, config);
+      return { provider: 'gemini', modelId: 'gemini-4-neon', reasoningEffort: 'medium' };
+    },
+    execute: fakeExecuteTurn((request) => {
+      directory = request.cwd;
+      assert.equal(request.harness, 'gemini');
+      assert.equal(request.model, 'gemini-4-neon');
+      assert.equal(request.reasoningEffort, 'medium');
+      assert.equal(request.mcpServers, undefined);
+      assert.equal(request.resumeSessionId, undefined);
+      assert.deepEqual(request.extraArgs, [
+        '--gemini-dir',
+        join(directory, 'state'),
+        '--include-default-customizations=false',
+        '--agent',
+        'reply-gate',
+      ]);
+      const agent = readFileSync(
+        join(directory, '.agents', 'agents', 'reply-gate', 'agent.md'),
+        'utf8'
+      );
+      assert.match(agent, /^tools: \[\]$/m);
+      assert.match(agent, /^commandExecutionPolicy: off$/m);
+      return {
+        events: (async function* () {
+          yield { type: 'text.delta', text: '<yes>' };
+        })(),
+        completed: Promise.resolve({
+          reason: 'success',
+          exitCode: 0,
+          signal: null,
+          sessionId: 'gate-session',
+        }),
+        stop: () => undefined,
+      };
+    }),
+  });
+  assert.deepEqual(await gate({ config, prompt: 'Should you respond?' }), { kind: 'respond' });
+  assert.ok(directory);
+  assert.equal(existsSync(directory), false);
 });
 
 // Owner decision 2026-10-07 (items 6-8): in a public or task thread a participant that follows no

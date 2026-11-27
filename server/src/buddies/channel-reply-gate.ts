@@ -8,7 +8,7 @@ import { runDetached } from './detached-cli';
 
 // The thread follow-up gate: "should you respond, or leave it to another team
 // member?" asked of one Buddy about one new thread post. It is a bare CLI run
-// on the Buddy's seat model — no Buddy MCP, no tools, no session files,
+// on the Buddy's seat model — no Buddy MCP, no tools, no retained session files,
 // a scratch cwd, and only `<yes>` or `<no>`; anything else is `unparseable`:
 // a Buddy that rambles past GATE_MAX_CHARS is stopped and stays silent.
 
@@ -65,21 +65,53 @@ export const RESTRICTED_FLAGS = {
   cursor: ['--mode', 'ask'],
 };
 
-const GATE_HARNESSES: Record<Provider, { args: string[]; effort: boolean } | null> = {
-  claude: { args: ['--tools', '', ...RESTRICTED_FLAGS.claude], effort: true },
-  codex: { args: RESTRICTED_FLAGS.codex, effort: true },
-  muse: { args: RESTRICTED_FLAGS.muse, effort: true },
+const GATE_HARNESSES: Record<
+  Provider,
+  { args: (directory: string) => string[]; effort: boolean } | null
+> = {
+  claude: { args: () => ['--tools', '', ...RESTRICTED_FLAGS.claude], effort: true },
+  codex: { args: () => RESTRICTED_FLAGS.codex, effort: true },
+  muse: { args: () => RESTRICTED_FLAGS.muse, effort: true },
   // Cursor has no flag to drop tools or persistence. `--mode ask` makes it read-only and, without
   // `--force`, nothing needing approval executes; any tool.use still ends the gate as
   // unparseable. The cwd is a fresh temp dir, so Cursor refuses to start unless `--trust` is
   // passed — a real seat turn runs in a directory the owner already trusted, which is why the
   // same harness answers a mention and then fails this gate. Its transcript is deleted after
   // exit (runDetached), and effort lives in the model id.
-  cursor: { args: [...RESTRICTED_FLAGS.cursor, '--trust'], effort: false },
-  pi: { args: [...PI_RESTRICTED_FLAGS], effort: true },
+  cursor: { args: () => [...RESTRICTED_FLAGS.cursor, '--trust'], effort: false },
+  pi: { args: () => [...PI_RESTRICTED_FLAGS], effort: true },
   opencode: null,
-  gemini: null,
+  // Four follow-ups in one thread failed before AGY launched because its gate was missing.
+  // Keep its tool-free agent and transcripts in scratch. Guard: "Antigravity follow-ups gate on the seat model".
+  gemini: { args: antigravityGateArgs, effort: true },
 };
+
+function antigravityGateArgs(directory: string): string[] {
+  const agent = path.join(directory, '.agents', 'agents', 'reply-gate');
+  fs.mkdirSync(agent, { recursive: true });
+  fs.writeFileSync(
+    path.join(agent, 'agent.md'),
+    [
+      '---',
+      'name: reply-gate',
+      'description: Decide whether to reply to a thread message using the supplied context.',
+      'tools: []',
+      'skills: []',
+      'subagent: false',
+      'commandExecutionPolicy: off',
+      '---',
+      'Use only the supplied context. Answer with exactly <yes> or <no>.',
+      '',
+    ].join('\n')
+  );
+  return [
+    '--gemini-dir',
+    path.join(directory, 'state'),
+    '--include-default-customizations=false',
+    '--agent',
+    'reply-gate',
+  ];
+}
 
 async function runGate(
   execute: typeof executeCommand,
@@ -139,7 +171,7 @@ export function createCliReplyGate(ports: {
         ...(gate.effort ? { reasoningEffort: execution.reasoningEffort } : {}),
         yolo: false,
         detached: true,
-        extraArgs: gate.args,
+        extraArgs: gate.args(directory),
       } as ExecuteCommandRequest;
       return await runGate(execute, request);
     } finally {

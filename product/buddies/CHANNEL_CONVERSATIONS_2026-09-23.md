@@ -161,8 +161,9 @@ seat config, server-posted answer), framed as "you chose to reply".
   (`reply_failed` notices are not announced). `server.ts` subscribes
   `responder.considerThreadPost`.
 - **Gate** (`channel-reply-gate.ts`): a bare CLI run on the Buddy's seat
-  config (its profile when it has no seat) — no Buddy MCP, no tools, no session files (a persisted transcript
-  would be imported as a conversation), scratch cwd. Output past 32 characters,
+  config (its profile when it has no seat) — no Buddy MCP, no tools, no retained
+  session files, scratch cwd. Antigravity launches a tool-free agent and keeps
+  its session data in that scratch directory so ingest never sees it. Output past 32 characters,
   or any tool call, stops the run as `unparseable`; `<yes> because…` is not a
   yes. Unparseable and failed gates are `console.warn`ed (error journal), never
   read as either answer. A gate that FAILED on an owner post also posts a
@@ -173,7 +174,7 @@ seat config, server-posted answer), framed as "you chose to reply".
   Claude 2.1.282 reports a session-limit 429 as `result` subtype `success`
   with `is_error: true` and no text deltas; until that was parsed as a
   failure, the gate logged `""` and the thread stayed quiet (2026-09-25,
-  post_fc9feb23). Claude, codex and muse only (the Buddy harnesses).
+  post_fc9feb23).
 - **"X is replying…"** starts the moment a gate says `<yes>` (the reply queue
   entry is created synchronously on the verdict, before the seat opens). Every
   add and remove of a queue entry is pushed as `channel_changed`, and the client
